@@ -50,6 +50,9 @@ def main() -> None:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     _common(sub.add_parser("probe", help="check NVR access and what a day's events look like"))
+    sv = sub.add_parser("serve", help="run the local API server for the desktop app")
+    sv.add_argument("--host", default="127.0.0.1")
+    sv.add_argument("--port", type=int, default=8765)
     for name, help_, opts in [
         ("fetch", "download a day of recordings and the NVR event list", [_fetch_opts]),
         ("analyze", "build backgrounds and moving-object tubes from fetched footage", [_analyze_opts]),
@@ -62,6 +65,10 @@ def main() -> None:
             o(sp)
 
     args = p.parse_args()
+    if args.cmd == "serve":
+        from .server import serve
+        serve(args.host, args.port)
+        return
     cameras = args.camera or DEFAULT_CAMERAS
     day = _day(args.day)
     if args.cmd == "probe":
