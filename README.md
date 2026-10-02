@@ -60,3 +60,24 @@ Render options:
 | `--max-tube 20` | longest any one object stays on screen; longer ones play faster |
 
 `reolapse run` does fetch, analyze and render in one go and accepts all of their options.
+
+## API server (for the desktop app)
+
+```
+uv run reolapse serve            # http://127.0.0.1:8765
+```
+
+| endpoint | purpose |
+|---|---|
+| `GET /api/days` | every day with per-camera status (`fetched` / `analyzed` / `rendered`), object counts, hourly activity |
+| `GET /api/days/{day}/{camera}` | one camera-day (`?fresh=1` skips the 15 s cache) |
+| `GET /api/days/{day}/{camera}/out/{file}` | rendered videos/stills (Range requests, so video seeks) |
+| `GET /api/days/{day}/{camera}/bg/{slot}` | 10-minute background images |
+| `GET /api/days/{day}/{camera}/clip?t=SECONDS&dur=30` | original footage at a time of day, streamed without re-encoding |
+| `POST /api/jobs` `{kind, day, cameras?, options?}` | queue fetch / analyze / render / run (one at a time; GPU) |
+| `GET /api/jobs`, `GET /api/jobs/{id}`, `POST /api/jobs/{id}/cancel` | job status, log, cancel |
+| `GET /api/events` | server-sent events: job snapshot, then live updates |
+| `GET/PUT /api/settings` | cameras, analysis/render defaults, retention, nightly schedule (`~/Library/Application Support/reolapse/settings.json`) |
+| `GET /api/nvr`, `POST /api/nvr/test` | who we connect as (credentials stay in `.env`), connection test |
+
+Tests: `uv run python -m pytest tests`.

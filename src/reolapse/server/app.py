@@ -38,6 +38,22 @@ def _check_camera(camera: str) -> str:
     return camera
 
 
+_recordings_cache: dict[tuple[str, str], tuple[float, list]] = {}
+
+
+def _recordings(paths: DayPaths) -> list:
+    """Recording list for a camera-day, cached until its files.json changes (probing is slow on the share)."""
+    from ..media import load_recordings
+
+    key = (paths.camera, paths.day.isoformat())
+    mtime = paths.files_index.stat().st_mtime if paths.files_index.exists() else 0.0
+    hit = _recordings_cache.get(key)
+    if hit is None or hit[0] != mtime:
+        hit = (mtime, load_recordings(paths))
+        _recordings_cache[key] = hit
+    return hit[1]
+
+
 def create_app(queue: JobQueue | None = None) -> FastAPI:
     queue = queue or JobQueue()
 
@@ -82,12 +98,10 @@ def create_app(queue: JobQueue | None = None) -> FastAPI:
     @app.get("/api/days/{day}/{camera}/clip")
     async def clip(day: str, camera: str, t: float, dur: float = 30.0):
         """Original footage starting at day-second `t`, streamed as fragmented MP4 (no re-encode)."""
-        from ..media import load_recordings
-
         paths = DayPaths(_check_camera(camera), date.fromisoformat(_check_day(day)))
         dur = max(1.0, min(dur, 600.0))
         try:
-            recs = await asyncio.to_thread(load_recordings, paths)
+            recs = await asyncio.to_thread(_recordings, paths)
         except SystemExit:
             raise HTTPException(404, "no recordings for that day")
         rec = next((r for r in recs if r.start <= t < r.end), None)
