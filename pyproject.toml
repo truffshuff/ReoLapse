@@ -1,0 +1,25 @@
+[project]
+name = "reolapse"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "truffshuff", email = "98434578+truffshuff@users.noreply.github.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "httpx>=0.28.1",
+    "lap>=0.5.13",
+    "numpy>=2.5.3",
+    "opencv-python-headless>=5.0.0.93",
+    "python-dotenv>=1.2.4",
+    "reolink-aio>=0.21.17",
+    "ultralytics>=8.4.171",
+]
+
+[project.scripts]
+reolapse = "reolapse:main"
+
+[build-system]
+requires = ["uv_build>=0.12.19,<0.13.0"]
+build-backend = "uv_build"
