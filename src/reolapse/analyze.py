@@ -346,12 +346,23 @@ def detect_tubes(paths: DayPaths, recs: list[Recording], windows, fps: float, mo
     return stats
 
 
+def _backgrounds_match(paths: DayPaths, recs: list[Recording]) -> bool:
+    sample = next(iter(sorted(paths.backgrounds.glob("*.jpg"))), None) if paths.backgrounds.is_dir() else None
+    if sample is None:
+        return False
+    img = cv2.imread(str(sample))
+    return img is not None and (img.shape[1], img.shape[0]) == recs[0].size
+
+
 def run(cameras: list[str], day, *, fps: float, model: str, imgsz: int, types: set[str], skip_bg: bool,
         hours: tuple[float, float] = (0, 24)) -> None:
     for cam in cameras:
         paths = DayPaths(cam, day)
         print(f"== {cam} {day}")
         recs = load_recordings(paths)
+        if skip_bg and not _backgrounds_match(paths, recs):
+            print("  existing backgrounds don't match this footage's frame size (stream changed?); rebuilding")
+            skip_bg = False
         if not skip_bg:
             build_backgrounds(paths, recs)
         windows = [(max(a, hours[0] * 3600), min(b, hours[1] * 3600)) for a, b in event_windows(paths, types)]

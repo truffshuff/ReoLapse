@@ -75,7 +75,11 @@ async def fetch_camera(nvr, camera: str, day: date, stream: str) -> None:
     paths.files_index.write_text(json.dumps(index, indent=1))
 
 
-async def run(cameras: list[str], day: date, stream: str) -> None:
+async def run(cameras: list[str], day: date, stream: str | None = None) -> None:
+    """Fetch each camera; `stream` overrides the per-camera Fluent/Clear setting."""
+    from .settings import load
+
+    streams = load()["streams"]
     async with nvrmod.connect() as nvr:
         for cam in cameras:
-            await fetch_camera(nvr, cam, day, stream)
+            await fetch_camera(nvr, cam, day, stream or streams.get(cam, "sub"))

@@ -33,6 +33,7 @@
     results: 'How long finished videos, stills and the object data behind them are kept.',
     nightly: 'Downloads and processes the previous day for every included camera, starting at this time.',
     cameras: 'Only fixed cameras work for synopsis: the background has to stay still. Tracking (pan/zoom) lenses are flagged.',
+    stream: 'Fluent is the camera\'s low-resolution sub stream: small and quick, about 100x real time to process (Garage 1920×576, ~5 GB a day). Clear is the full-resolution main stream: much sharper cutouts, but far bigger and slower: Garage 5120×1552 is ~36 GB and ~45 min of downloading a day, Porch Left 4K is ~89 GB and ~1.7 h, and a whole-day scan takes about 3 hours per camera even on the hardware decoder. Clear frames are scaled to 2560 px wide for processing. A change applies the next time a day is downloaded; that day is then re-analyzed in the new stream.',
     work: 'Where backgrounds and object data are written and videos are rendered. These are many small, random reads and writes, so a folder on this Mac is much faster than the network share. Finished videos and stills are still copied to the archive, and days processed before you change this keep working from the share. About 1 GB per camera per day accumulates here.',
     nvr: 'The NVR address and login come from the project\'s .env file. Use a dedicated NVR user whose password has no & # % or spaces.',
   };
@@ -78,6 +79,14 @@
     s.cameras = on ? [...s.cameras.filter((c) => c !== name), name] : s.cameras.filter((c) => c !== name);
   }
 
+  const streamOf = (name) => s.streams[name] ?? 'sub';
+
+  function setStream(name, stream) {
+    const next = { ...s.streams };
+    if (stream === 'sub') delete next[name]; else next[name] = stream;
+    s.streams = next;
+  }
+
   function setStyle(style, on) {
     const want = new Set(s.render.styles);
     on ? want.add(style) : want.delete(style);
@@ -93,7 +102,7 @@
       const ch = fromNvr.find((c) => c.name === name);
       const moving = ch ? MOVING_LENS.test(ch.model) : false;
       const hint = [ch?.model, moving ? 'lens moves (tracking): synopsis not supported' : ''].filter(Boolean).join(' · ');
-      return { name, hint, on: s.cameras.includes(name) };
+      return { name, hint, moving, on: s.cameras.includes(name) };
     });
   });
 </script>
@@ -124,11 +133,17 @@
     <section class="panel" aria-labelledby="cam-h">
       <div class="row"><h2 id="cam-h">Cameras</h2><InfoTip text={HELP.cameras} />
         {#if !test?.ok}<span class="dim small">Test the connection to list every NVR camera.</span>{/if}</div>
-      <div class="switches">
-        {#each cameraRows as c (c.name)}
-          <Switch label={c.name} hint={c.hint} checked={c.on} onchange={(on) => setCamera(c.name, on)} />
-        {/each}
-      </div>
+      <div class="cam-head small dim"><span></span><span class="lab">Stream<InfoTip text={HELP.stream} /></span><span>Include</span></div>
+      {#each cameraRows as c (c.name)}
+        <div class="cam-row">
+          <div class="cam-text"><span class="name">{c.name}</span>{#if c.hint}<span class="small" class:warn={c.moving}>{c.hint}</span>{/if}</div>
+          <div class="seg" role="group" aria-label="{c.name} stream">
+            <button type="button" aria-pressed={streamOf(c.name) === 'sub'} onclick={() => setStream(c.name, 'sub')}>Fluent</button>
+            <button type="button" aria-pressed={streamOf(c.name) === 'main'} onclick={() => setStream(c.name, 'main')}>Clear</button>
+          </div>
+          <Switch compact label="Include {c.name}" checked={c.on} onchange={(on) => setCamera(c.name, on)} />
+        </div>
+      {/each}
     </section>
 
     <div class="cols2">
@@ -231,6 +246,14 @@
   .cols3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
   .cols2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; align-items: start; }
   .cols2.inner { gap: 14px; }
+  .cam-head, .cam-row { display: grid; grid-template-columns: minmax(0, 1fr) auto 64px; gap: 16px; align-items: center; }
+  .cam-head span:last-child { text-align: right; }
+  .cam-row { min-height: 56px; border-top: 1px solid var(--line); }
+  .cam-row :global(.row) { justify-content: flex-end; }
+  .cam-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .name { font-size: 14px; }
+  .warn { color: var(--warn); }
+  .dim { color: var(--dim); }
   .switches { display: flex; flex-direction: column; }
   .switches :global(.row) { border-top: 1px solid var(--line); }
   .field { display: flex; flex-direction: column; gap: 6px; }

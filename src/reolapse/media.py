@@ -16,13 +16,29 @@ import numpy as np
 from .config import DayPaths
 
 
+# Frames wider than this (Clear/main streams: 5120x1552, 3840x2160) are decoded on the Mac's hardware
+# decoder and scaled down to it -- about 8x real time, versus 2-4x decoding them on the CPU.
+MAX_WIDTH = 2560
+
+
 @dataclass
 class Recording:
     path: Path
     start: float  # seconds since local midnight of the analysed day (may be negative)
     end: float
-    width: int
+    width: int  # as stored in the file
     height: int
+
+    @property
+    def big(self) -> bool:
+        return self.width > MAX_WIDTH
+
+    @property
+    def size(self) -> tuple[int, int]:
+        """Frame size the pipeline works at (scaled down for big streams, even dimensions)."""
+        if not self.big:
+            return self.width, self.height
+        return MAX_WIDTH, int(round(self.height * MAX_WIDTH / self.width / 2)) * 2
 
 
 def day_seconds(iso: str, day_start: datetime) -> float:
@@ -69,8 +85,12 @@ def remux(src: Path, dest: Path) -> None:
     tmp.replace(dest)
 
 
-def _ffmpeg_frames(path: Path, w: int, h: int, args_in: list[str], vf: str) -> Iterator[np.ndarray]:
-    cmd = ["ffmpeg", "-v", "error", *args_in, "-i", str(path),
+def _ffmpeg_frames(rec: Recording, args_in: list[str], vf: str) -> Iterator[np.ndarray]:
+    w, h = rec.size
+    if rec.big:  # hardware decode + scale, then download to system memory
+        args_in = ["-hwaccel", "videotoolbox", "-hwaccel_output_format", "videotoolbox_vld", *args_in]
+        vf = f"{vf},scale_vt=w={w}:h={h},hwdownload,format=nv12"
+    cmd = ["ffmpeg", "-v", "error", *args_in, "-i", str(rec.path),
            "-an", "-vf", vf, "-f", "rawvideo", "-pix_fmt", "bgr24", "-"]
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=w * h * 3 * 4)
     size = w * h * 3
@@ -100,7 +120,7 @@ def frames(recs: list[Recording], t0: float, t1: float, fps: float) -> Iterator[
         off = a - r.start
         args = ["-ss", f"{off:.3f}", "-t", f"{b - a:.3f}"]
         i = 0
-        for f in _ffmpeg_frames(r.path, r.width, r.height, args, f"fps={fps}"):
+        for f in _ffmpeg_frames(r, args, f"fps={fps}"):
             yield a + i * step, f
             i += 1
         t = a + i * step
@@ -127,8 +147,9 @@ def prefetch(it: Iterator, depth: int = 32) -> Iterator:
 
 
 def keyframe_samples(rec: Recording, every: float) -> Iterator[tuple[float, np.ndarray]]:
-    """Fast sparse sampling: decode keyframes only, one frame per `every` seconds."""
-    i = 0
-    for f in _ffmpeg_frames(rec.path, rec.width, rec.height, ["-skip_frame", "nokey"], f"fps=1/{every}"):
+    """Fast sparse sampling: decode keyframes only, one frame per `every` seconds.
+
+    Works for big streams too (hardware decode): an hour of Clear footage samples in 20-35 s.
+    """
+    for i, f in enumerate(_ffmpeg_frames(rec, ["-skip_frame", "nokey"], f"fps=1/{every}")):
         yield rec.start + i * every, f
-        i += 1

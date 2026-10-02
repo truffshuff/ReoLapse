@@ -123,3 +123,11 @@ def test_work_root_setting_and_share_fallback(env, tmp_path, monkeypatch):
     p.tubes_out.mkdir(parents=True)
     assert p.tubes == p.tubes_out
     assert p.published == data / "garage" / "2026-10-01" / "out"
+
+
+def test_stream_settings(env):
+    s = settings_mod.save({"streams": {"Porch Left": "main"}})
+    assert s["streams"] == {"Porch Left": "main"}
+    assert settings_mod.save({"streams": {"Garage": "sub"}})["streams"] == {"Garage": "sub"}  # replaces the map
+    with pytest.raises(ValueError):
+        settings_mod.save({"streams": {"Garage": "4k"}})

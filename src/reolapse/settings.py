@@ -19,7 +19,11 @@ DEFAULTS: dict = {
     "retention": {"raw_days": 14, "results_days": 90},
     "nightly": {"enabled": False, "time": "02:00"},
     "storage": {"work_root": ""},  # empty = use the share (REOLAPSE_WORK in .env overrides)
+    "streams": {},  # camera name -> "sub" (Fluent, default) or "main" (Clear)
 }
+
+# Settings whose keys are user data (camera names), not a fixed schema.
+FREE_FORM = {"streams"}
 
 
 def _merge(base: dict, patch: dict, path: str = "") -> dict:
@@ -28,7 +32,13 @@ def _merge(base: dict, patch: dict, path: str = "") -> dict:
     for key, value in patch.items():
         if key not in base:
             raise ValueError(f"unknown setting {path}{key}")
-        if isinstance(base[key], dict):
+        if not path and key in FREE_FORM:
+            if not isinstance(value, dict):
+                raise ValueError(f"setting {key} must be an object")
+            if key == "streams" and any(v not in ("sub", "main") for v in value.values()):
+                raise ValueError("streams values must be 'sub' (Fluent) or 'main' (Clear)")
+            out[key] = dict(value)
+        elif isinstance(base[key], dict):
             if not isinstance(value, dict):
                 raise ValueError(f"setting {path}{key} must be an object")
             out[key] = _merge(base[key], value, f"{path}{key}.")

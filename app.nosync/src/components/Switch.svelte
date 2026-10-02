@@ -1,6 +1,7 @@
 <script>
   // Accessible on/off switch (role="switch"); the whole row is the click target.
-  let { checked = $bindable(false), label, hint = '', disabled = false, onchange } = $props();
+  // `compact` draws only the track (the caller shows the label); `label` is then the accessible name.
+  let { checked = $bindable(false), label, hint = '', disabled = false, compact = false, onchange } = $props();
 
   function toggle() {
     if (disabled) return;
@@ -9,11 +10,14 @@
   }
 </script>
 
-<button type="button" class="row" role="switch" aria-checked={checked} {disabled} onclick={toggle}>
-  <span class="text">
-    <span class="label">{label}</span>
-    {#if hint}<span class="hint">{hint}</span>{/if}
-  </span>
+<button type="button" class="row" class:compact role="switch" aria-checked={checked} aria-label={compact ? label : undefined}
+        {disabled} onclick={toggle}>
+  {#if !compact}
+    <span class="text">
+      <span class="label">{label}</span>
+      {#if hint}<span class="hint">{hint}</span>{/if}
+    </span>
+  {/if}
   <span class="track" class:on={checked} aria-hidden="true"><span class="knob"></span></span>
 </button>
 
@@ -27,5 +31,6 @@
   .track.on { background: var(--accent); }
   .knob { position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 10px; background: var(--text); transition: left 0.15s; }
   .track.on .knob { left: 21px; }
+  .row.compact { width: auto; }
   .row:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 6px; }
 </style>

@@ -15,7 +15,8 @@ def _common(sp):
 
 
 def _fetch_opts(sp):
-    sp.add_argument("--stream", choices=["sub", "main"], default="sub")
+    sp.add_argument("--stream", choices=["sub", "main"], default=None,
+                    help="sub = Fluent, main = Clear (default: each camera's setting, else sub)")
 
 
 def _analyze_opts(sp):
