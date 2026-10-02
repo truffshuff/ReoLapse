@@ -43,7 +43,7 @@ def build_backgrounds(paths: DayPaths, recs: list[Recording], workers: int = 4) 
     Each recording file is sampled in its own worker; slots wholly inside one file are
     finished there, and only slots straddling a file boundary are merged afterwards.
     """
-    out = paths.backgrounds
+    out = paths.backgrounds_out
     if out.exists():
         shutil.rmtree(out)
     out.mkdir(parents=True)
@@ -204,7 +204,7 @@ def save_tube(paths: DayPaths, seg: list[Det], fps: float, context: list[Det] = 
     tube = {"t0": seg[0].t, "t1": seg[-1].t, "category": cat,
             "cls": Counter(d.cls for d in seg).most_common(1)[0][0], "fps": fps, "frames": frames_out,
             "context": [(*d.box, _png(d.crop)) for d in context]}
-    with open(paths.tubes / name, "wb") as fh:
+    with open(paths.tubes_out / name, "wb") as fh:
         pickle.dump(tube, fh, protocol=pickle.HIGHEST_PROTOCOL)
     return cat
 
@@ -251,9 +251,9 @@ def _tracker():
 def detect_tubes(paths: DayPaths, recs: list[Recording], windows, fps: float, model_name: str, imgsz: int) -> Counter:
     from ultralytics import YOLO
 
-    if paths.tubes.exists():
-        shutil.rmtree(paths.tubes)
-    paths.tubes.mkdir(parents=True)
+    if paths.tubes_out.exists():
+        shutil.rmtree(paths.tubes_out)
+    paths.tubes_out.mkdir(parents=True)
 
     model = YOLO(str(MODEL_DIR / model_name))
     keep = [i for i, n in model.names.items() if n in CATEGORIES]

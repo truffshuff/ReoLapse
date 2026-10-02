@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import bisect
+import json
 import pickle
 import shutil
 import subprocess
@@ -281,6 +282,9 @@ def render_video(paths: DayPaths, tubes: list[Tube], bgs: Backgrounds, *, style:
             print(f"\r  rendering {k}/{nframes}", end="", flush=True)
     enc.stdin.close()
     enc.wait()
+    # Sidecar for the app: maps time of day <-> video time (day_t = video_t / length * 86400).
+    dest.with_suffix(".json").write_text(json.dumps(
+        {"length": length, "duration": total, "fps": fps, "speed": speed, "drift_min": drift_min, "tubes": len(tubes)}))
     print(f"\r  wrote {dest}")
     return dest
 

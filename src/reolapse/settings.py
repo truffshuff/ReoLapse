@@ -18,6 +18,7 @@ DEFAULTS: dict = {
                "max_tube": 20.0},
     "retention": {"raw_days": 14, "results_days": 90},
     "nightly": {"enabled": False, "time": "02:00"},
+    "storage": {"work_root": ""},  # empty = use the share (REOLAPSE_WORK in .env overrides)
 }
 
 

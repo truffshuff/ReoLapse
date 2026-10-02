@@ -1,6 +1,7 @@
 <script>
   // Interim player: plays the rendered synopsis MP4s and jumps to original footage.
-  // The live, in-app compositor (instant style/filter changes, click an object) replaces this in phase 3.
+  // Clicking the activity graph moves the synopsis to that time of day and loads the original
+  // recording from the same moment. The live, in-app compositor replaces the MP4s in phase 3.
   import { onMount } from 'svelte';
   import { api, media } from '../lib/api.js';
   import { clock, longDay, parseClock, CAT_LABEL } from '../lib/format.js';
@@ -12,11 +13,16 @@
   let camera = $state(params.camera ?? '');
   let info = $state(null);
   let videoName = $state('');
+  let synVideo = $state();
+  let length = $state(0); // synopsis seconds that span the 24 h day (from the render's sidecar)
+  let synTime = $state(0);
   let originalAt = $state('12:00');
+  let originalT = $state(null);
   let originalSrc = $state('');
 
   const cameras = $derived(days.find((d) => d.day === day)?.cameras ?? []);
   const videos = $derived((info?.outputs ?? []).filter((o) => o.name.endsWith('.mp4')));
+  const dayT = $derived(length ? Math.min(86399, (synTime / length) * 86400) : null);
 
   onMount(async () => {
     days = await api.days();
@@ -33,14 +39,29 @@
     history.replaceState(null, '', `#/player?day=${d}&camera=${encodeURIComponent(c)}`);
     api.cameraDay(d, c).then((x) => {
       info = x;
-      const vids = x.outputs.filter((o) => o.name.endsWith('.mp4'));
-      videoName = (vids.find((v) => v.name.includes('cutout')) ?? vids[0])?.name ?? '';
+      const vids = x.outputs.filter((o) => o.name.endsWith('.mp4') && !/_(person|vehicle|animal)/.test(o.name));
+      videoName = (vids.find((v) => v.name.includes('cutout')) ?? vids[0] ?? x.outputs.find((o) => o.name.endsWith('.mp4')))?.name ?? '';
       originalSrc = '';
+      originalT = null;
     });
   });
 
+  // The render's sidecar says how many video seconds cover the day; older renders fall back to the duration.
+  $effect(() => {
+    if (!videoName) return;
+    length = 0;
+    fetch(media.out(day, camera, videoName.replace(/\.mp4$/, '.json')))
+      .then((r) => (r.ok ? r.json() : null))
+      .then((meta) => { if (meta?.length) length = meta.length; })
+      .catch(() => {});
+  });
+
+  function onMeta() {
+    if (!length && synVideo?.duration) length = synVideo.duration;
+  }
+
   function label(name) {
-    // synopsis_cutout_category.mp4 -> "Cutout · type"
+    // synopsis_cutout_category.mp4 -> "cutout · type"
     const [, style, color, ...rest] = name.replace('.mp4', '').split('_');
     return [style, color === 'category' ? 'type' : color, ...rest].filter(Boolean).join(' · ');
   }
@@ -50,9 +71,31 @@
     return hourly.map((v) => Math.round((56 * v) / max));
   }
 
-  function showOriginal(t = parseClock(originalAt)) {
-    originalAt = `${String(Math.floor(t / 3600)).padStart(2, '0')}:${String(Math.floor((t % 3600) / 60)).padStart(2, '0')}`;
+  function toInput(t) {
+    return `${String(Math.floor(t / 3600)).padStart(2, '0')}:${String(Math.floor((t % 3600) / 60)).padStart(2, '0')}`;
+  }
+
+  function showOriginal(t) {
+    originalT = t;
+    originalAt = toInput(t);
     originalSrc = media.clip(day, camera, t, 120);
+  }
+
+  /** Move the synopsis to time of day `t` and load the original footage from the same moment. */
+  function jumpTo(t) {
+    t = Math.max(0, Math.min(86399, t));
+    if (synVideo && length) {
+      synVideo.currentTime = (t / 86400) * length;
+      synVideo.play().catch(() => {});
+    }
+    showOriginal(t);
+  }
+
+  // Mouse clicks map the exact x position to a time; keyboard activation (detail 0) uses the hour's middle.
+  function onBarClick(e, hour) {
+    if (e.detail === 0) return jumpTo(hour * 3600 + 1800);
+    const rect = e.currentTarget.parentElement.getBoundingClientRect();
+    jumpTo(((e.clientX - rect.left) / rect.width) * 86400);
   }
 </script>
 
@@ -75,7 +118,8 @@
   <section class="stage">
     {#if videoName}
       <!-- svelte-ignore a11y_media_has_caption -->
-      <video src={media.out(day, camera, videoName)} controls autoplay muted></video>
+      <video bind:this={synVideo} src={media.out(day, camera, videoName)} controls autoplay muted
+             onloadedmetadata={onMeta} ontimeupdate={() => (synTime = synVideo.currentTime)} onseeked={() => (synTime = synVideo.currentTime)}></video>
     {:else}
       <div class="empty">No synopsis rendered for this camera and day yet. Run it from <a href="#/jobs">Jobs</a>.</div>
     {/if}
@@ -88,12 +132,18 @@
   {/if}
 
   {#if info}
-    <section aria-label="Activity by hour">
+    <section aria-label="Activity by hour" class="tl-wrap">
+      <div class="tl-head">
+        <span class="small muted">Click the graph to jump the synopsis there and show the original footage</span>
+        {#if dayT != null}<span class="mono small push">synopsis at {clock(dayT)}</span>{/if}
+      </div>
       <div class="timeline">
         {#each bars(info.hourly) as h, i}
-          <button style:--h="{Math.max(1, h)}px" aria-label="Original footage at {clock(i * 3600)}" title="Original footage at {clock(i * 3600)}"
-                  onclick={() => showOriginal(i * 3600 + 1800)}></button>
+          <button style:--h="{Math.max(1, h)}px" aria-label="Jump to {clock(i * 3600)}" title="Jump to {clock(i * 3600)}–{clock((i + 1) * 3600)}"
+                  onclick={(e) => onBarClick(e, i)}></button>
         {/each}
+        {#if dayT != null}<div class="playhead" style:left="{(dayT / 86400) * 100}%" aria-hidden="true"></div>{/if}
+        {#if originalT != null}<div class="orig" style:left="{(originalT / 86400) * 100}%" aria-hidden="true"></div>{/if}
       </div>
       <div class="axis mono dim"><span>12a</span><span>3a</span><span>6a</span><span>9a</span><span>12p</span><span>3p</span><span>6p</span><span>9p</span><span>12a</span></div>
     </section>
@@ -102,8 +152,8 @@
       <div class="row">
         <h2>Original footage</h2>
         <input type="time" bind:value={originalAt} aria-label="Time of day" />
-        <button class="btn" onclick={() => showOriginal()}>Show</button>
-        <span class="dim small">Click an hour above to jump there.</span>
+        <button class="btn" onclick={() => jumpTo(parseClock(originalAt))}>Go</button>
+        {#if originalT != null}<span class="small muted">from {clock(originalT, true)}</span>{/if}
       </div>
       {#if originalSrc}
         <!-- svelte-ignore a11y_media_has_caption -->
@@ -124,15 +174,19 @@
   .small { font-size: 13px; }
   .stage { border-radius: 12px; overflow: hidden; background: var(--inset); border: 1px solid var(--line); }
   video { width: 100%; display: block; background: #000; }
-  .timeline { display: flex; align-items: flex-end; gap: 3px; height: 64px; padding: 0 3px; border-radius: 8px;
+  .tl-wrap { display: flex; flex-direction: column; gap: 6px; }
+  .tl-head { display: flex; align-items: center; gap: 12px; }
+  .timeline { position: relative; display: flex; align-items: flex-end; gap: 3px; height: 64px; padding: 0 3px; border-radius: 8px;
               background: var(--rail); border: 1px solid var(--line); }
   /* whole column is the click target; the bar is drawn inside it */
-  .timeline button { flex: 1; height: 100%; padding: 0; border: 0; background: transparent; position: relative; }
+  .timeline button { flex: 1; height: 100%; padding: 0; border: 0; background: transparent; position: relative; cursor: crosshair; }
   .timeline button::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: var(--h);
                             border-radius: 2px 2px 0 0; background: var(--accent); }
   .timeline button:hover { background: rgba(142, 168, 255, 0.08); }
   .timeline button:hover::after { background: #B7C7FF; }
-  .axis { display: flex; justify-content: space-between; font-size: 11px; margin-top: 6px; }
+  .playhead { position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; background: var(--text); pointer-events: none; }
+  .orig { position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; background: var(--person); pointer-events: none; }
+  .axis { display: flex; justify-content: space-between; font-size: 11px; }
   .original { display: flex; flex-direction: column; gap: 12px; }
   .original video { border-radius: 8px; }
 </style>

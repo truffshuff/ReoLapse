@@ -102,3 +102,24 @@ def test_library_status(env):
         r = client.get("/api/days/2026-10-01/Garage/out/synopsis_cutout_category.mp4")
         assert r.status_code == 200 and len(r.content) == 10
         assert client.get("/api/days/2026-10-01/Garage/out/..%2Fsecret").status_code == 404
+
+
+def test_work_root_setting_and_share_fallback(env, tmp_path, monkeypatch):
+    from datetime import date
+
+    data, _ = env
+    monkeypatch.delenv("REOLAPSE_WORK", raising=False)
+    local = tmp_path / "local"
+    settings_mod.save({"storage": {"work_root": str(local)}})
+    monkeypatch.setattr(config, "WORK_ROOT", config._work_root())
+    assert config.WORK_ROOT == local
+
+    p = config.DayPaths("Garage", date(2026, 10, 1))
+    # nothing local yet, but the share has tubes from before: read from the share, write locally
+    (data / "garage" / "2026-10-01" / "tubes").mkdir(parents=True)
+    assert p.tubes == data / "garage" / "2026-10-01" / "tubes"
+    assert p.tubes_out == local / "garage" / "2026-10-01" / "tubes"
+    # once the work area has tubes, it wins
+    p.tubes_out.mkdir(parents=True)
+    assert p.tubes == p.tubes_out
+    assert p.published == data / "garage" / "2026-10-01" / "out"

@@ -4,6 +4,7 @@
   import Switch from '../components/Switch.svelte';
   import InfoTip from '../components/InfoTip.svelte';
 
+  const LOCAL_WORK = '~/Library/Caches/reolapse';
   const MOVING_LENS = /track|ptz/i; // TrackMix / TrackFlex lenses pan and zoom: no stable background
 
   const STYLES = [
@@ -32,6 +33,7 @@
     results: 'How long finished videos, stills and the object data behind them are kept.',
     nightly: 'Downloads and processes the previous day for every included camera, starting at this time.',
     cameras: 'Only fixed cameras work for synopsis: the background has to stay still. Tracking (pan/zoom) lenses are flagged.',
+    work: 'Where backgrounds and object data are written and videos are rendered. These are many small, random reads and writes, so a folder on this Mac is much faster than the network share. Finished videos and stills are still copied to the archive, and days processed before you change this keep working from the share. About 1 GB per camera per day accumulates here.',
     nvr: 'The NVR address and login come from the project\'s .env file. Use a dedicated NVR user whose password has no & # % or spaces.',
   };
 
@@ -59,6 +61,7 @@
       const out = await api.saveSettings($state.snapshot(s));
       s = out;
       saved = structuredClone(out);
+      health = await api.health();
       message = 'Saved.';
     } catch (e) {
       message = 'Not saved: ' + e.message;
@@ -184,7 +187,14 @@
       <section class="panel" aria-labelledby="st-h">
         <h2 id="st-h">Storage</h2>
         <div class="field"><label for="data-root">Archive (raw footage, finished videos)</label><input id="data-root" type="text" value={health?.data_root ?? ''} readonly /></div>
-        <div class="field"><label for="work-root">Working folder</label><input id="work-root" type="text" value={health?.work_root ?? ''} readonly /></div>
+        <div class="field">
+          <div class="lab"><label for="work-root">Working folder</label><InfoTip text={HELP.work} /></div>
+          <div class="inline">
+            <input id="work-root" type="text" bind:value={s.storage.work_root} placeholder="Same as archive (slower)" />
+            <button class="btn" type="button" onclick={() => (s.storage.work_root = LOCAL_WORK)}>Use this Mac's drive</button>
+          </div>
+          <p class="desc">In use: <span class="mono">{health?.work_root ?? ''}</span>{health?.work_root === health?.data_root ? ' (the archive share)' : ''}</p>
+        </div>
         <div class="cols2 inner">
           <div class="field">
             <div class="lab"><label for="raw-days">Keep raw footage (days)</label><InfoTip text={HELP.raw} /></div>
@@ -195,7 +205,7 @@
             <input id="res-days" type="number" min="1" bind:value={s.retention.results_days} />
           </div>
         </div>
-        <p class="desc">Folders are set in .env (REOLAPSE_DATA, REOLAPSE_WORK). Automatic cleanup isn't active yet.</p>
+        <p class="desc">The archive is set in .env (REOLAPSE_DATA). Automatic cleanup isn't active yet.</p>
       </section>
 
       <section class="panel" aria-labelledby="ni-h">
@@ -230,5 +240,7 @@
   .desc { margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--muted); }
   .desc strong { color: var(--text); font-weight: 500; }
   input[readonly] { color: var(--muted); }
+  .inline { display: flex; gap: 10px; }
+  .inline input { flex: 1; min-width: 0; }
   input[type=range] { width: 100%; }
 </style>

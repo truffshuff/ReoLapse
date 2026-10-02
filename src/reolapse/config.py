@@ -14,9 +14,26 @@ load_dotenv()
 
 # Share: raw recordings, the NVR event list, and the finished videos/stills.
 DATA_ROOT = Path(os.environ.get("REOLAPSE_DATA", "/Volumes/Photos/ReoLink"))
-# Local working area for the random-access intermediates (backgrounds, object tubes, rendering).
-# Unset = keep everything on the share. Avoid ~/Documents: it is iCloud-synced.
-WORK_ROOT = Path(os.environ["REOLAPSE_WORK"]).expanduser() if os.environ.get("REOLAPSE_WORK") else DATA_ROOT
+
+
+def _work_root() -> Path:
+    """Local working area for the random-access intermediates (backgrounds, object tubes, rendering).
+
+    REOLAPSE_WORK wins, then the app's storage.work_root setting; unset = everything on the share.
+    Avoid ~/Documents: it is iCloud-synced.
+    """
+    if os.environ.get("REOLAPSE_WORK"):
+        return Path(os.environ["REOLAPSE_WORK"]).expanduser()
+    from .settings import load  # settings.py imports nothing from here
+
+    try:
+        configured = load()["storage"]["work_root"]
+    except Exception:
+        configured = ""
+    return Path(configured).expanduser() if configured else DATA_ROOT
+
+
+WORK_ROOT = _work_root()
 MODEL_DIR = Path(__file__).resolve().parents[2] / "models"
 
 DEFAULT_CAMERAS = ["Garage", "Porch Left", "Back Yard Right"]
@@ -59,12 +76,30 @@ class DayPaths:
     def events(self) -> Path:
         return self.root / "events.json"
 
+    def _existing(self, sub: str) -> Path:
+        """Read location: the work area, else (for days processed before it was set) the share."""
+        local = self.work / sub
+        if local.exists() or self.work == self.root:
+            return local
+        shared = self.root / sub
+        return shared if shared.exists() else local
+
     @property
     def backgrounds(self) -> Path:
-        return self.work / "bg"
+        return self._existing("bg")
 
     @property
     def tubes(self) -> Path:
+        return self._existing("tubes")
+
+    @property
+    def backgrounds_out(self) -> Path:
+        """Where analysis writes backgrounds (always the work area)."""
+        return self.work / "bg"
+
+    @property
+    def tubes_out(self) -> Path:
+        """Where analysis writes tubes (always the work area)."""
         return self.work / "tubes"
 
     @property

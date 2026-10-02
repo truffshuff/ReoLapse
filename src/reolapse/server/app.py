@@ -195,9 +195,12 @@ def create_app(queue: JobQueue | None = None) -> FastAPI:
     @app.put("/api/settings")
     def put_settings(patch: dict):
         try:
-            return settings_mod.save(patch)
+            saved = settings_mod.save(patch)
         except ValueError as e:
             raise HTTPException(400, str(e))
+        config.WORK_ROOT = config._work_root()  # a changed working folder applies without a restart
+        library._cache.clear()
+        return saved
 
     @app.get("/api/models")
     def models():
