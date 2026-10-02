@@ -81,3 +81,19 @@ uv run reolapse serve            # http://127.0.0.1:8765
 | `GET /api/nvr`, `POST /api/nvr/test` | who we connect as (credentials stay in `.env`), connection test |
 
 Tests: `uv run python -m pytest tests`.
+
+## Desktop app
+
+The Electron app lives in `app.nosync/` (the `.nosync` suffix keeps `node_modules` and the Electron runtime
+out of iCloud). It starts the API server if one isn't already running and opens the UI, which the server hosts
+from `app.nosync/dist`.
+
+```
+cd app.nosync
+npm install
+npm run build      # build the UI into dist/
+npm run app        # launch the desktop app
+```
+
+For UI development, run `uv run reolapse serve` and `npm run dev` (Vite on :5173, proxying /api), then
+`npm run app:dev`. The scripts clear `ELECTRON_RUN_AS_NODE`, which VS Code's terminal sets.

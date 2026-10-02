@@ -37,14 +37,15 @@ def probe_size(path: Path) -> tuple[int, int]:
     return s["width"], s["height"]
 
 
-def load_recordings(paths: DayPaths) -> list[Recording]:
+def load_recordings(paths: DayPaths, probe: bool = True) -> list[Recording]:
+    """The day's recording files. `probe=False` skips reading frame sizes (slow on the share)."""
     day_start = datetime(paths.day.year, paths.day.month, paths.day.day)
     recs = []
     for f in json.loads(paths.files_index.read_text()):
         p = paths.raw / f["path"]
-        if not p.exists():
+        if probe and not p.exists():
             continue
-        w, h = probe_size(p)
+        w, h = probe_size(p) if probe else (0, 0)
         recs.append(Recording(p, day_seconds(f["start"], day_start), day_seconds(f["end"], day_start), w, h))
     if not recs:
         raise SystemExit(f"No recordings under {paths.raw}; run `reolapse fetch` first")

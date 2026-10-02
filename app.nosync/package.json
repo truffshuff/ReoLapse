@@ -1,0 +1,20 @@
+{
+  "name": "reolapse-app",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Reolapse desktop app",
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "app": "env -u ELECTRON_RUN_AS_NODE electron .",
+    "app:dev": "env -u ELECTRON_RUN_AS_NODE REOLAPSE_UI_URL=http://localhost:5173 electron ."
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.3.1",
+    "electron": "^44.5.1",
+    "svelte": "^5.57.1",
+    "vite": "^8.3.2"
+  }
+}

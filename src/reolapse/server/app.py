@@ -10,11 +10,16 @@ from datetime import date
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .. import config
 from .. import settings as settings_mod
 from ..config import DayPaths
+from pathlib import Path
+
+# The desktop UI's production build (app.nosync/dist), hosted at / so the app and API share an origin.
+UI_DIR = Path(os.environ.get("REOLAPSE_UI_DIR", Path(__file__).resolve().parents[3] / "app.nosync" / "dist"))
 from . import library
 from .jobs import JobQueue
 
@@ -49,7 +54,7 @@ def _recordings(paths: DayPaths) -> list:
     mtime = paths.files_index.stat().st_mtime if paths.files_index.exists() else 0.0
     hit = _recordings_cache.get(key)
     if hit is None or hit[0] != mtime:
-        hit = (mtime, load_recordings(paths))
+        hit = (mtime, load_recordings(paths, probe=False))
         _recordings_cache[key] = hit
     return hit[1]
 
@@ -198,5 +203,8 @@ def create_app(queue: JobQueue | None = None) -> FastAPI:
                                      for ch in nvr.channels]}
         except (Exception, SystemExit) as e:
             return {"ok": False, "error": str(e)}
+
+    if UI_DIR.is_dir():  # mounted last so /api routes win
+        app.mount("/", StaticFiles(directory=UI_DIR, html=True), name="ui")
 
     return app
