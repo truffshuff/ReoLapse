@@ -2,6 +2,8 @@
   import { onMount, tick } from 'svelte';
   import { api, onJobEvents } from '../lib/api.js';
   import { yesterday, duration } from '../lib/format.js';
+  import Switch from '../components/Switch.svelte';
+  import InfoTip from '../components/InfoTip.svelte';
 
   const KINDS = [
     { id: 'run', label: 'Everything (download → analyze → render)' },
@@ -117,14 +119,16 @@
     <aside class="side">
       <form class="panel form" onsubmit={submit}>
         <h2>Process a day</h2>
-        <label class="field">Day<input type="date" bind:value={day} required /></label>
-        <label class="field">What to do
-          <select bind:value={kind}>{#each KINDS as k}<option value={k.id}>{k.label}</option>{/each}</select>
-        </label>
+        <div class="field"><label for="day">Day</label><input id="day" type="date" bind:value={day} required /></div>
+        <div class="field">
+          <div class="lab"><label for="kind">What to do</label>
+            <InfoTip text="Everything downloads the day from the NVR, finds moving objects, then renders the videos and stills. Run a single step to redo just that part, for example re-render after changing styles in Settings." /></div>
+          <select id="kind" bind:value={kind}>{#each KINDS as k}<option value={k.id}>{k.label}</option>{/each}</select>
+        </div>
         <fieldset>
           <legend class="muted">Cameras</legend>
           {#each cameras as c}
-            <label class="check"><input type="checkbox" bind:checked={chosen[c]} />{c}</label>
+            <Switch label={c} bind:checked={chosen[c]} />
           {/each}
         </fieldset>
         {#if error}<div class="err small">{error}</div>{/if}
@@ -164,7 +168,9 @@
   .form { display: flex; flex-direction: column; gap: 14px; }
   fieldset { border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 4px; }
   legend { font-size: 13px; margin-bottom: 4px; }
-  .check { display: flex; align-items: center; gap: 10px; min-height: 36px; font-size: 14px; }
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .field label { font-size: 13px; color: var(--muted); }
+  .lab { display: flex; align-items: center; gap: 2px; }
   .err { color: var(--bad); }
   .logbox { display: flex; flex-direction: column; gap: 10px; }
   pre { margin: 0; max-height: 420px; overflow: auto; padding: 12px 14px; border-radius: 10px; background: var(--inset);

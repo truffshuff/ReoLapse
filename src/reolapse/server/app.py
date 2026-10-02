@@ -18,6 +18,19 @@ from .. import settings as settings_mod
 from ..config import DayPaths
 from pathlib import Path
 
+# Segmentation models offered in Settings. Speeds measured on an M2 at detector size 1280; any other
+# *.pt found in models/ is listed too. Missing ones download automatically on first use.
+MODEL_CATALOG = [
+    {"file": "yolo26n-seg.pt", "name": "YOLO26 nano", "speed": "fastest (~40 frames/s)",
+     "about": "Recommended. Plenty for people, cars and pets at normal distances."},
+    {"file": "yolo26s-seg.pt", "name": "YOLO26 small", "speed": "about 2x slower (~22 frames/s)",
+     "about": "Finds more small or distant objects (far side of the street) and draws tighter outlines."},
+    {"file": "yolo26m-seg.pt", "name": "YOLO26 medium", "speed": "about 4x slower",
+     "about": "Most accurate of the three; only worth it if small objects are being missed."},
+    {"file": "yolo11n-seg.pt", "name": "YOLO11 nano", "speed": "fastest",
+     "about": "Previous generation nano model; kept for comparison."},
+]
+
 # The desktop UI's production build (app.nosync/dist), hosted at / so the app and API share an origin.
 UI_DIR = Path(os.environ.get("REOLAPSE_UI_DIR", Path(__file__).resolve().parents[3] / "app.nosync" / "dist"))
 from . import library
@@ -185,6 +198,14 @@ def create_app(queue: JobQueue | None = None) -> FastAPI:
             return settings_mod.save(patch)
         except ValueError as e:
             raise HTTPException(400, str(e))
+
+    @app.get("/api/models")
+    def models():
+        present = {p.name for p in config.MODEL_DIR.glob("*.pt")}
+        known = {m["file"] for m in MODEL_CATALOG}
+        extra = [{"file": f, "name": f, "speed": "", "about": "Custom model found in models/."}
+                 for f in sorted(present - known)]
+        return [{**m, "downloaded": m["file"] in present} for m in MODEL_CATALOG + extra]
 
     @app.get("/api/nvr")
     def nvr_info():
