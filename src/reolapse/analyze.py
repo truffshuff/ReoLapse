@@ -34,6 +34,9 @@ LOST_AFTER = 3.0  # close a track not seen for this long
 MIN_TUBE = 1.0  # discard tubes shorter than this
 LINGER = {"person": 8.0, "animal": 8.0, "vehicle": 4.0}  # stationary time before a tube ends
 
+GATE_DIFF = 30  # grey-level change that counts as motion (640-wide, blurred)
+GATE_MIN_PIXELS = 40  # changed pixels, after speckle removal, needed to wake the detector
+
 
 # ---------------------------------------------------------------- backgrounds
 
@@ -218,6 +221,7 @@ class MotionGate:
         self.prev: deque = deque(maxlen=self.lag + 1)
         self.hold = hold
         self.last_motion = -1e9
+        self._kernel = np.ones((3, 3), np.uint8)
 
     def reset(self):
         self.prev.clear()
@@ -231,8 +235,12 @@ class MotionGate:
         self.prev.append(small)
         if len(self.prev) <= self.lag:
             return True  # warm-up: let YOLO see the start of every window
-        diff = cv2.absdiff(small, self.prev[0]) > 20
-        if int(np.count_nonzero(diff)) > 25:
+        # Threshold, then remove single-pixel speckle (compression grain, night noise) before counting:
+        # on Porch Left's 640x360 night stream this cut the gate from ~37% to <1% of frames while busy
+        # afternoons still pass ~25-30%.
+        diff = (cv2.absdiff(small, self.prev[0]) > GATE_DIFF).astype(np.uint8)
+        diff = cv2.morphologyEx(diff, cv2.MORPH_OPEN, self._kernel)
+        if int(np.count_nonzero(diff)) > GATE_MIN_PIXELS:
             self.last_motion = t
         return t - self.last_motion <= self.hold
 
