@@ -28,11 +28,15 @@ export const api = {
   nvr: () => request('GET', '/api/nvr'),
   models: () => request('GET', '/api/models'),
   testNvr: () => request('POST', '/api/nvr/test'),
+  objects: (day, cam, regions, categories = []) =>
+    request('GET', `/api/days/${day}/${encodeURIComponent(cam)}/objects?regions=${encodeURIComponent(
+      regions.map((r) => [r.x0, r.y0, r.x1, r.y1].map((v) => v.toFixed(4)).join(',')).join(';'))}&categories=${categories.join(',')}`),
 };
 
 export const media = {
   out: (day, cam, name) => `/api/days/${day}/${encodeURIComponent(cam)}/out/${encodeURIComponent(name)}`,
   bg: (day, cam, slot) => `/api/days/${day}/${encodeURIComponent(cam)}/bg/${slot}`,
+  thumb: (day, cam, id) => `/api/days/${day}/${encodeURIComponent(cam)}/objects/${encodeURIComponent(id)}/thumb`,
   clip: (day, cam, t, dur = 60) => `/api/days/${day}/${encodeURIComponent(cam)}/clip?t=${Math.round(t)}&dur=${dur}`,
 };
 

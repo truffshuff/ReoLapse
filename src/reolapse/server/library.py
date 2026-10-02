@@ -47,7 +47,7 @@ def camera_day(camera: str, day: str, fresh: bool = False) -> dict:
     hourly = [0] * 24
     if paths.tubes.is_dir():
         for p in paths.tubes.glob("*.pkl"):
-            t0, _, cat = p.stem.partition("_")
+            t0, cat = (p.stem.split("_") + [""])[:2]  # 036000.0_person[_2]
             try:
                 hourly[min(23, int(float(t0) // 3600))] += 1
             except ValueError:

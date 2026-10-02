@@ -4,7 +4,8 @@
   // recording from the same moment. The live, in-app compositor replaces the MP4s in phase 3.
   import { onMount } from 'svelte';
   import { api, media } from '../lib/api.js';
-  import { clock, longDay, parseClock, CAT_LABEL } from '../lib/format.js';
+  import { clock, longDay, parseClock, duration, CAT_LABEL } from '../lib/format.js';
+  import RegionOverlay from '../components/RegionOverlay.svelte';
 
   let { params } = $props();
 
@@ -19,6 +20,14 @@
   let originalAt = $state('12:00');
   let originalT = $state(null);
   let originalSrc = $state('');
+
+  // Find in area
+  let drawing = $state(false);
+  let regions = $state([]);
+  let kinds = $state({ person: true, vehicle: true, animal: true });
+  let found = $state(null);
+  let searching = $state(false);
+  let searchError = $state('');
 
   const cameras = $derived(days.find((d) => d.day === day)?.cameras ?? []);
   const videos = $derived((info?.outputs ?? []).filter((o) => o.name.endsWith('.mp4')));
@@ -43,7 +52,29 @@
       videoName = (vids.find((v) => v.name.includes('cutout')) ?? vids[0] ?? x.outputs.find((o) => o.name.endsWith('.mp4')))?.name ?? '';
       originalSrc = '';
       originalT = null;
+      regions = [];
+      found = null;
     });
+  });
+
+  // Re-run the area search whenever the areas or type filters change (debounced).
+  $effect(() => {
+    const rs = $state.snapshot(regions);
+    const cats = Object.entries(kinds).filter(([, on]) => on).map(([k]) => k);
+    if (!rs.length || !day || !camera) { found = null; return; }
+    const d = day, c = camera;
+    const timer = setTimeout(async () => {
+      searching = true;
+      searchError = '';
+      try {
+        const res = await api.objects(d, c, rs, cats);
+        if (d === day && c === camera) found = res.objects;
+      } catch (e) {
+        searchError = e.message;
+      }
+      searching = false;
+    }, 300);
+    return () => clearTimeout(timer);
   });
 
   // The render's sidecar says how many video seconds cover the day; older renders fall back to the duration.
@@ -120,15 +151,61 @@
       <!-- svelte-ignore a11y_media_has_caption -->
       <video bind:this={synVideo} src={media.out(day, camera, videoName)} controls autoplay muted
              onloadedmetadata={onMeta} ontimeupdate={() => (synTime = synVideo.currentTime)} onseeked={() => (synTime = synVideo.currentTime)}></video>
+      <RegionOverlay bind:regions {drawing} />
     {:else}
       <div class="empty">No synopsis rendered for this camera and day yet. Run it from <a href="#/jobs">Jobs</a>.</div>
     {/if}
   </section>
 
-  {#if videos.length > 1}
-    <div class="seg" role="group" aria-label="Version">
-      {#each videos as v}<button aria-pressed={v.name === videoName} onclick={() => (videoName = v.name)}>{label(v.name)}</button>{/each}
-    </div>
+  <div class="toolbar">
+    {#if videos.length > 1}
+      <div class="seg" role="group" aria-label="Version">
+        {#each videos as v}<button aria-pressed={v.name === videoName} onclick={() => (videoName = v.name)}>{label(v.name)}</button>{/each}
+      </div>
+    {/if}
+    {#if videoName}
+      <div class="push row">
+        <button class="btn" class:primary={drawing} aria-pressed={drawing} onclick={() => (drawing = !drawing)}>
+          {drawing ? 'Done drawing' : 'Find in area'}
+        </button>
+        {#if regions.length}<button class="btn quiet" onclick={() => { regions = []; drawing = false; }}>Clear areas</button>{/if}
+      </div>
+    {/if}
+  </div>
+
+  {#if regions.length}
+    <section class="panel found" aria-label="Objects in the selected areas">
+      <div class="row">
+        <h2>In {regions.length === 1 ? 'this area' : `these ${regions.length} areas`}</h2>
+        <div class="seg" role="group" aria-label="Show">
+          {#each Object.keys(kinds) as k}
+            <button aria-pressed={kinds[k]} onclick={() => (kinds[k] = !kinds[k])}><span class="dot {k}"></span> {CAT_LABEL[k]}</button>
+          {/each}
+        </div>
+        <span class="small muted push">
+          {#if searching}Searching… (the first search of an older day builds an index and can take a few minutes)
+          {:else if searchError}<span class="err">{searchError}</span>
+          {:else if found}{found.length} found{/if}
+        </span>
+      </div>
+      {#if found?.length}
+        <ul class="results">
+          {#each found as o (o.id)}
+            <li>
+              <button class="result" onclick={() => jumpTo(o.enter)} title="Jump to {clock(o.enter, true)}">
+                <img src={media.thumb(day, camera, o.id)} alt="{o.category} at {clock(o.enter)}" loading="lazy" />
+                <span class="meta">
+                  <span class="when mono"><span class="dot {o.category}"></span>{clock(o.enter)}</span>
+                  <span class="small muted">{duration(o.t1 - o.t0)} on camera</span>
+                </span>
+              </button>
+            </li>
+          {/each}
+        </ul>
+      {:else if found && !searching}
+        <div class="small muted">Nothing passed through {regions.length === 1 ? 'that area' : 'those areas'}.</div>
+      {/if}
+    </section>
   {/if}
 
   {#if info}
@@ -172,7 +249,18 @@
   .row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
   .push { margin-left: auto; }
   .small { font-size: 13px; }
-  .stage { border-radius: 12px; overflow: hidden; background: var(--inset); border: 1px solid var(--line); }
+  .stage { position: relative; border-radius: 12px; overflow: hidden; background: var(--inset); border: 1px solid var(--line); }
+  .toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .found { display: flex; flex-direction: column; gap: 12px; }
+  .err { color: var(--bad); }
+  .results { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+             gap: 10px; max-height: 340px; overflow: auto; }
+  .result { width: 100%; padding: 8px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2);
+            display: flex; flex-direction: column; gap: 6px; text-align: left; }
+  .result:hover { border-color: var(--accent); }
+  .result img { width: 100%; height: 96px; object-fit: contain; background: var(--inset); border-radius: 6px; }
+  .meta { display: flex; flex-direction: column; gap: 2px; }
+  .when { display: flex; align-items: center; gap: 6px; font-size: 13px; }
   video { width: 100%; display: block; background: #000; }
   .tl-wrap { display: flex; flex-direction: column; gap: 6px; }
   .tl-head { display: flex; align-items: center; gap: 12px; }

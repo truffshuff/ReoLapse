@@ -19,6 +19,7 @@ from datetime import datetime
 import cv2
 import numpy as np
 
+from . import tube_index
 from .config import CATEGORIES, MODEL_DIR, DayPaths
 from .media import Recording, day_seconds, frames, keyframe_samples, load_recordings, prefetch
 
@@ -200,16 +201,20 @@ def _png(img: np.ndarray) -> bytes:
     return cv2.imencode(".png", img, [cv2.IMWRITE_PNG_COMPRESSION, 1])[1].tobytes()
 
 
-def save_tube(paths: DayPaths, seg: list[Det], fps: float, context: list[Det] = ()) -> str:
+def save_tube(paths: DayPaths, seg: list[Det], fps: float, context: list[Det] = ()) -> dict:
+    """Write one tube file; returns its index entry (see tube_index)."""
     cat = Track.category(seg)
     frames_out = [(d.t, *d.box, _png(d.crop)) for d in seg]
-    name = f"{seg[0].t:08.1f}_{cat}.pkl"
+    name, n = f"{seg[0].t:08.1f}_{cat}.pkl", 1
+    while (paths.tubes_out / name).exists():  # two objects can start in the same tenth of a second
+        n += 1
+        name = f"{seg[0].t:08.1f}_{cat}_{n}.pkl"
     tube = {"t0": seg[0].t, "t1": seg[-1].t, "category": cat,
             "cls": Counter(d.cls for d in seg).most_common(1)[0][0], "fps": fps, "frames": frames_out,
             "context": [(*d.box, _png(d.crop)) for d in context]}
     with open(paths.tubes_out / name, "wb") as fh:
         pickle.dump(tube, fh, protocol=pickle.HIGHEST_PROTOCOL)
-    return cat
+    return tube_index.tube_meta(name, seg[0].t, seg[-1].t, cat, [(d.t, *d.box) for d in seg])
 
 
 class MotionGate:
@@ -268,6 +273,7 @@ def detect_tubes(paths: DayPaths, recs: list[Recording], windows, fps: float, mo
     gate = MotionGate(fps)
     tracker = _tracker()
     stats: Counter = Counter()
+    metas: list[dict] = []
     total = sum(b - a for a, b in windows)
     done = 0.0
     yolo_frames = all_frames = 0
@@ -289,7 +295,9 @@ def detect_tubes(paths: DayPaths, recs: list[Recording], windows, fps: float, mo
 
         def finish(seg, owner: Track):
             if seg:
-                stats[save_tube(paths, seg, fps, context_for(seg, owner, tracks.values()))] += 1
+                meta = save_tube(paths, seg, fps, context_for(seg, owner, tracks.values()))
+                metas.append(meta)
+                stats[meta["category"]] += 1
 
         def expire(t: float):
             for tid in [k for k, tr in tracks.items() if t - tr.last_t > LOST_AFTER]:
@@ -343,6 +351,7 @@ def detect_tubes(paths: DayPaths, recs: list[Recording], windows, fps: float, mo
         done += b - a
         report(done, wi)
     print()
+    tube_index.write(paths.tubes_out, metas, recs[0].size)
     return stats
 
 

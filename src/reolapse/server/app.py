@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 from contextlib import asynccontextmanager
 from datetime import date
 
@@ -70,6 +71,31 @@ def _recordings(paths: DayPaths) -> list:
         hit = (mtime, load_recordings(paths, probe=False))
         _recordings_cache[key] = hit
     return hit[1]
+
+
+_index_cache: dict[tuple[str, str], tuple[float, dict]] = {}
+
+
+def _tube_index(paths: DayPaths) -> dict | None:
+    """The day's tube index (cached; built once from the tube files for older days)."""
+    import cv2
+
+    from .. import tube_index
+
+    f = paths.tubes / tube_index.INDEX_NAME
+    key = (paths.camera, paths.day.isoformat())
+    mtime = f.stat().st_mtime if f.exists() else 0.0
+    hit = _index_cache.get(key)
+    if hit and hit[0] == mtime and mtime:
+        return hit[1]
+    size = None
+    bg = next(iter(sorted(paths.backgrounds.glob("*.jpg"))), None) if paths.backgrounds.is_dir() else None
+    if bg is not None and (img := cv2.imread(str(bg))) is not None:
+        size = (img.shape[1], img.shape[0])
+    index = tube_index.load(paths.tubes, size)
+    if index is not None:
+        _index_cache[key] = (f.stat().st_mtime if f.exists() else 0.0, index)
+    return index
 
 
 def create_app(queue: JobQueue | None = None) -> FastAPI:
@@ -140,6 +166,43 @@ def create_app(queue: JobQueue | None = None) -> FastAPI:
                 await proc.wait()
 
         return StreamingResponse(body(), media_type="video/mp4")
+
+    @app.get("/api/days/{day}/{camera}/objects")
+    async def objects(day: str, camera: str, regions: str = "", categories: str = ""):
+        """Objects whose box centre entered any region. regions: "x0,y0,x1,y1;..." normalised 0..1
+        (no regions = every object). categories: comma list."""
+        from .. import tube_index
+
+        paths = DayPaths(_check_camera(camera), date.fromisoformat(_check_day(day)))
+        index = await asyncio.to_thread(_tube_index, paths)
+        if index is None:
+            raise HTTPException(404, "this day hasn't been analyzed")
+        try:
+            boxes = [tuple(float(v) for v in r.split(",")) for r in regions.split(";") if r.strip()]
+        except ValueError:
+            raise HTTPException(400, "regions must be x0,y0,x1,y1;...")
+        if any(len(b) != 4 for b in boxes):
+            raise HTTPException(400, "regions must be x0,y0,x1,y1;...")
+        boxes = [(min(a, c), min(b, d), max(a, c), max(b, d)) for a, b, c, d in boxes] or [(0, 0, 1, 1)]
+        cats = {c for c in categories.split(",") if c} or None
+        return {"width": index["width"], "height": index["height"], "objects": tube_index.query(index, boxes, cats)}
+
+    @app.get("/api/days/{day}/{camera}/objects/{obj_id}/thumb")
+    def object_thumb(day: str, camera: str, obj_id: str):
+        """The object's middle crop (PNG with transparency)."""
+        import pickle
+
+        from fastapi.responses import Response
+
+        if not library.DAY_RE.fullmatch(day) or not re.fullmatch(r"[0-9.]+_[a-z]+(_\d+)?", obj_id):
+            raise HTTPException(400, "bad object id")
+        f = DayPaths(_check_camera(camera), date.fromisoformat(day)).tubes / f"{obj_id}.pkl"
+        if not f.is_file():
+            raise HTTPException(404, "no such object")
+        with open(f, "rb") as fh:
+            frames = pickle.load(fh)["frames"]
+        return Response(frames[len(frames) // 2][5], media_type="image/png",
+                        headers={"Cache-Control": "max-age=86400"})
 
     # ---------------------------------------------------------------- jobs
     @app.get("/api/jobs")

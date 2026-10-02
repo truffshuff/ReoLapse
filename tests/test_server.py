@@ -131,3 +131,35 @@ def test_stream_settings(env):
     assert settings_mod.save({"streams": {"Garage": "sub"}})["streams"] == {"Garage": "sub"}  # replaces the map
     with pytest.raises(ValueError):
         settings_mod.save({"streams": {"Garage": "4k"}})
+
+
+def test_area_query(env):
+    import cv2
+    import numpy as np
+    from reolapse import tube_index
+
+    data, work = env
+    tubes = work / "garage" / "2026-10-01" / "tubes"
+    tubes.mkdir(parents=True)
+    crop = cv2.imencode(".png", np.zeros((10, 10, 4), np.uint8))[1].tobytes()
+    # a person walking left->right across the top half; a car crossing the bottom
+    walk = [(100 + i, 50 * i, 100, 50 * i + 40, 200, crop) for i in range(20)]
+    drive = [(500 + i, 1900 - 90 * i, 400, 1900 - 90 * i + 150, 500, crop) for i in range(20)]
+    for name, frames, cat in (("000100.0_person.pkl", walk, "person"), ("000500.0_vehicle.pkl", drive, "vehicle")):
+        (tubes / name).write_bytes(pickle.dumps({"t0": frames[0][0], "t1": frames[-1][0], "category": cat, "frames": frames}))
+    bg = work / "garage" / "2026-10-01" / "bg"
+    bg.mkdir()
+    cv2.imwrite(str(bg / "078.jpg"), np.zeros((576, 1920, 3), np.uint8))
+
+    with TestClient(create_app(JobQueue(fake_command))) as client:
+        top_right = client.get("/api/days/2026-10-01/Garage/objects", params={"regions": "0.4,0,1,0.5"}).json()
+        assert [o["id"] for o in top_right["objects"]] == ["000100.0_person"]
+        assert 115 <= top_right["objects"][0]["enter"] <= 117  # centre crosses x=0.4*1920 around frame 15
+        both = client.get("/api/days/2026-10-01/Garage/objects", params={"regions": "0,0,0.2,0.5;0.4,0.6,0.6,1"}).json()
+        assert {o["category"] for o in both["objects"]} == {"person", "vehicle"}
+        only_cars = client.get("/api/days/2026-10-01/Garage/objects", params={"categories": "vehicle"}).json()
+        assert [o["category"] for o in only_cars["objects"]] == ["vehicle"]
+        assert (tubes / tube_index.INDEX_NAME).exists()  # built once and cached
+        r = client.get("/api/days/2026-10-01/Garage/objects/000100.0_person/thumb")
+        assert r.status_code == 200 and r.headers["content-type"] == "image/png"
+        assert client.get("/api/days/2026-10-01/Garage/objects/..%2Fx/thumb").status_code in (400, 404)
