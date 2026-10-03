@@ -416,8 +416,8 @@ class JobQueue:
                 buf = parts.pop()  # unterminated tail
                 for text, end in zip(parts[0::2], parts[1::2]):
                     self._segment(job, text, end)
-            if buf:
-                self._segment(job, buf, "\n")
+            if buf:  # unterminated tail when the process ends: an in-place status, not a log line
+                self._segment(job, buf, "\r")
             job.returncode = await job.proc.wait()
         except Exception as e:  # spawn failure etc.
             self._write_log(job, f"Could not run the job: {e}")
