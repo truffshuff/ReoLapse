@@ -223,13 +223,39 @@ def create_app(queue: JobQueue | None = None) -> FastAPI:
     def jobs():
         return [j.summary() for j in sorted(queue.jobs.values(), key=lambda j: -j.id)]
 
+    # Job-changing handlers are async so they run on the event loop with the scheduler.
     @app.post("/api/jobs", status_code=201)
-    def submit(req: JobRequest):
+    async def submit(req: JobRequest):
+        """Queue work for a day. kind "run" (Everything) becomes three jobs; returns the first,
+        with all of them under "jobs"."""
         cameras = req.cameras or settings_mod.load()["cameras"]
         for c in cameras:
             _check_camera(c)
         try:
-            return queue.submit(req.kind, _check_day(req.day), cameras, req.options).summary()
+            created = queue.submit(req.kind, _check_day(req.day), cameras, req.options)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        return {**created[0].summary(), "jobs": [j.summary() for j in created]}
+
+    def _job(job_id: int):
+        if job_id not in queue.jobs:
+            raise HTTPException(404, "no such job")
+        return queue.jobs[job_id]
+
+    @app.post("/api/jobs/{job_id}/retry")
+    async def retry(job_id: int):
+        _job(job_id)
+        try:
+            return queue.retry(job_id).summary()
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+
+    @app.post("/api/jobs/{job_id}/move")
+    async def move(job_id: int, delta: int):
+        """Move a queued job up (delta=-1) or down (delta=1)."""
+        _job(job_id)
+        try:
+            return queue.move(job_id, delta).summary()
         except ValueError as e:
             raise HTTPException(400, str(e))
 
@@ -252,7 +278,7 @@ def create_app(queue: JobQueue | None = None) -> FastAPI:
                             filename=f"reolapse-job-{job.id}-{job.kind}-{job.day}.log")
 
     @app.post("/api/jobs/{job_id}/cancel")
-    def cancel(job_id: int):
+    async def cancel(job_id: int):
         if job_id not in queue.jobs:
             raise HTTPException(404, "no such job")
         return queue.cancel(job_id).summary()

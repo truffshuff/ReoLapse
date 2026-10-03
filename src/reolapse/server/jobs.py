@@ -7,6 +7,12 @@ REOLAPSE_PROGRESS=json; its output is read as segments ending in "\\r" or "\\n":
 - text ending in "\\r"   -> job.status, an in-place line (download speed, frames rendered…)
 - text ending in "\\n"   -> job.log, and the job's full log file
 
+Scheduling: two lanes run side by side, one job each -- "download" (network: fetch) and
+"process" (GPU/CPU: analyze, render) -- so the next day can download while an earlier day is
+analyzed. Within a lane jobs start in queue order (reorderable), but a day's steps keep their
+order: its analysis waits for its download, its render for its analysis. "Everything" is
+queued as those three separate jobs.
+
 The queue is saved to disk, so jobs survive a server restart: queued jobs stay queued, and a
 job that was running is resumed (each pipeline step skips work that's already finished).
 """
@@ -28,6 +34,10 @@ from typing import Callable
 from .. import settings as settings_mod
 
 KINDS = ("fetch", "analyze", "render", "run")
+STEPS = ("fetch", "analyze", "render")  # what "run" (Everything) expands into
+STAGE = {"fetch": 0, "analyze": 1, "render": 2, "run": 0}
+LANE = {"fetch": "download", "analyze": "process", "render": "process", "run": "process"}
+STEP_NAME = {"fetch": "download", "analyze": "object finding", "render": "rendering", "run": "processing"}
 KIND_LABEL = {"run": "Everything (download, analyze, render)", "fetch": "Download", "analyze": "Find moving objects",
               "render": "Render videos and stills"}
 STATE_DIR = settings_mod.SETTINGS_PATH.parent
@@ -53,11 +63,18 @@ class Job:
     returncode: int | None = None
     progress: dict = field(default_factory=dict)
     status_line: str = ""
+    order: float = 0.0  # position in the queue (lower runs first)
+    group: int | None = None  # jobs queued together by "Everything"
+    waiting: str = ""  # why a queued job can't start yet
     log: deque = field(default_factory=lambda: deque(maxlen=400))
     proc: asyncio.subprocess.Process | None = field(default=None, repr=False)
 
     FIELDS = ("id", "kind", "day", "cameras", "options", "status", "created", "started", "finished",
-              "returncode", "progress", "status_line")
+              "returncode", "progress", "status_line", "order", "group", "waiting")
+
+    @property
+    def lane(self) -> str:
+        return LANE[self.kind]
 
     def summary(self, with_log: bool = False) -> dict:
         d = {k: getattr(self, k) for k in self.FIELDS}
@@ -105,9 +122,9 @@ class JobQueue:
         self.command_for = command_for
         self.state_dir = state_dir or STATE_DIR
         self.jobs: dict[int, Job] = {}
-        self._pending: asyncio.Queue[Job] = asyncio.Queue()
         self._listeners: set[asyncio.Queue] = set()
-        self._worker: asyncio.Task | None = None
+        self._tasks: set[asyncio.Task] = set()
+        self._started = False
         self._next_id = 1
 
     # -- persistence
@@ -138,15 +155,13 @@ class JobQueue:
             return
         for d in saved:
             job = Job(**{k: d[k] for k in Job.FIELDS if k in d})
+            job.order = job.order or float(job.id)
             if job.status == "running":  # the server stopped mid-job: pick it up again
                 job.status = "queued"
-                self._write_log(job, f"--- The server restarted while this job was running; resuming. "
-                                     f"Steps that already finished are skipped.")
+                self._write_log(job, "--- The server restarted while this job was running; resuming. "
+                                     "Steps that already finished are skipped.")
             self.jobs[job.id] = job
             self._next_id = max(self._next_id, job.id + 1)
-        for job in sorted(self.jobs.values(), key=lambda j: j.id):
-            if job.status == "queued":
-                self._pending.put_nowait(job)
         try:  # the in-memory log tail, so the app shows recent lines after a restart
             for job in self.jobs.values():
                 f = self.log_path(job)
@@ -157,32 +172,40 @@ class JobQueue:
 
     # -- lifecycle
     def start(self) -> None:
-        if self._worker is None:
+        if not self._started:
+            self._started = True
             self._restore()
-            self._worker = asyncio.create_task(self._run_forever())
+            self._schedule()
 
     async def stop(self) -> None:
         for job in self.jobs.values():
             if job.proc and job.proc.returncode is None:
                 job.proc.terminate()
-        if self._worker:
-            self._worker.cancel()
+        for t in list(self._tasks):
+            t.cancel()
 
-    # -- API
-    def submit(self, kind: str, day: str, cameras: list[str], options: dict | None = None) -> Job:
+    # -- API (call from the event loop: the HTTP handlers are async)
+    def submit(self, kind: str, day: str, cameras: list[str], options: dict | None = None) -> list[Job]:
+        """Queue a job; "run" (Everything) becomes download + find objects + render jobs."""
         if kind not in KINDS:
             raise ValueError(f"unknown job kind {kind!r}")
         if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
             raise ValueError("day must be YYYY-MM-DD")
-        job = Job(kind, day, list(cameras), options or {}, id=self._next_id)
-        self._next_id += 1
-        self.jobs[job.id] = job
-        self._pending.put_nowait(job)
-        when = date.fromisoformat(day).strftime("%a %b %-d")
-        self._write_log(job, f"Queued: {KIND_LABEL[kind]} for {when}; cameras: {', '.join(job.cameras)}")
+        kinds = list(STEPS) if kind == "run" else [kind]
+        last = max((j.order for j in self.jobs.values()), default=0.0)
+        created = []
+        for k in kinds:
+            job = Job(k, day, list(cameras), options or {}, id=self._next_id, order=last + 1 + len(created))
+            self._next_id += 1
+            if len(kinds) > 1:
+                job.group = created[0].id if created else job.id
+            self.jobs[job.id] = job
+            when = date.fromisoformat(day).strftime("%a %b %-d")
+            self._write_log(job, f"Queued: {KIND_LABEL[k]} for {when}; cameras: {', '.join(job.cameras)}")
+            created.append(job)
         self._save()
-        self._publish(job)
-        return job
+        self._schedule()
+        return created
 
     def cancel(self, job_id: int) -> Job:
         job = self.jobs[job_id]
@@ -191,10 +214,37 @@ class JobQueue:
             job.finished = time.time()
             self._write_log(job, "Cancelled before it started.")
             self._save()
-            self._publish(job)
+            self._schedule()
         elif job.status == "running" and job.proc:
             job.status = "cancelled"
             job.proc.terminate()
+        return job
+
+    def retry(self, job_id: int) -> Job:
+        """Put a failed or cancelled job back in the queue (at the end)."""
+        job = self.jobs[job_id]
+        if job.status not in ("failed", "cancelled"):
+            raise ValueError("only failed or cancelled jobs can be retried")
+        job.status, job.returncode, job.finished, job.progress, job.status_line = "queued", None, None, {}, ""
+        job.order = max(j.order for j in self.jobs.values()) + 1
+        self._write_log(job, "Retry requested; queued again.")
+        self._save()
+        self._schedule()
+        return job
+
+    def move(self, job_id: int, delta: int) -> Job:
+        """Move a queued job up (delta < 0) or down among the queued jobs."""
+        job = self.jobs[job_id]
+        if job.status != "queued":
+            raise ValueError("only queued jobs can be moved")
+        queued = sorted((j for j in self.jobs.values() if j.status == "queued"), key=lambda j: j.order)
+        i = queued.index(job)
+        queued.insert(max(0, min(len(queued) - 1, i + delta)), queued.pop(i))
+        base = min(j.order for j in queued)
+        for n, j in enumerate(queued):
+            j.order = base + n
+        self._save()
+        self._schedule()
         return job
 
     def subscribe(self) -> asyncio.Queue:
@@ -204,6 +254,43 @@ class JobQueue:
 
     def unsubscribe(self, q: asyncio.Queue) -> None:
         self._listeners.discard(q)
+
+    # -- scheduling
+    def _blocker(self, job: Job) -> str:
+        """Why a queued job can't start yet because of its day's earlier steps ('' = it can)."""
+        earlier = [o for o in self.jobs.values() if o is not job and o.day == job.day
+                   and STAGE[o.kind] < STAGE[job.kind] and set(o.cameras) & set(job.cameras)]
+        for o in sorted(earlier, key=lambda o: o.order):
+            if o.status in ("queued", "running"):
+                return f"waits for this day's {STEP_NAME[o.kind]} (job {o.id})"
+        for stage in sorted({STAGE[o.kind] for o in earlier}):
+            latest = max((o for o in earlier if STAGE[o.kind] == stage), key=lambda o: o.id)
+            if latest.status in ("failed", "cancelled"):
+                return f"this day's {STEP_NAME[latest.kind]} {latest.status} (job {latest.id}); retry it to continue"
+        return ""
+
+    def _schedule(self) -> None:
+        """Start the next runnable job in each idle lane and refresh the 'waiting' reasons."""
+        running_lanes = {j.lane for j in self.jobs.values() if j.status == "running"}
+        queued = sorted((j for j in self.jobs.values() if j.status == "queued"), key=lambda j: j.order)
+        to_start = []
+        for job in queued:
+            reason = self._blocker(job)
+            if not reason and job.lane in running_lanes:
+                reason = f"next in the {job.lane} lane" if job.lane not in {j.lane for j in to_start} else ""
+            if not reason and job.lane not in running_lanes:
+                to_start.append(job)
+                running_lanes.add(job.lane)
+                continue
+            if reason != job.waiting:
+                job.waiting = reason
+                self._publish(job)
+        for job in to_start:
+            job.waiting = ""
+            job.status = "running"  # claim the lane now; _run fills in the rest
+            task = asyncio.get_running_loop().create_task(self._run(job))
+            self._tasks.add(task)
+            task.add_done_callback(self._tasks.discard)
 
     # -- internals
     def _publish(self, job: Job, line: str | None = None) -> None:
@@ -227,13 +314,6 @@ class JobQueue:
         except OSError:
             pass
         self._publish(job, job.log[-1])
-
-    async def _run_forever(self) -> None:
-        while True:
-            job = await self._pending.get()
-            if job.status == "cancelled":
-                continue
-            await self._run(job)
 
     async def _run(self, job: Job) -> None:
         job.status, job.started, job.status_line = "running", time.time(), ""
@@ -271,6 +351,7 @@ class JobQueue:
         job.proc = None
         self._save()
         self._publish(job)
+        self._schedule()
 
     def _segment(self, job: Job, text: str, end: str) -> None:
         text = text.rstrip()

@@ -6,10 +6,15 @@
   import InfoTip from '../components/InfoTip.svelte';
 
   const KINDS = [
-    { id: 'run', label: 'Everything (download → analyze → render)' },
+    { id: 'run', label: 'Everything (download → find objects → render)' },
     { id: 'fetch', label: 'Download only' },
     { id: 'analyze', label: 'Find moving objects' },
     { id: 'render', label: 'Render videos & stills' },
+  ];
+  const TITLE = { fetch: 'Download', analyze: 'Find moving objects', render: 'Render', run: 'Everything' };
+  const LANES = [
+    { id: 'download', label: 'Download lane', kinds: ['fetch'] },
+    { id: 'process', label: 'Processing lane', kinds: ['analyze', 'render', 'run'] },
   ];
   const STATUS_CLS = { queued: '', running: 'run', done: 'ok', failed: 'bad', cancelled: '' };
 
@@ -25,7 +30,10 @@
   let chosen = $state({});
   let error = $state('');
 
-  const list = $derived([...jobs.values()].sort((a, b) => b.id - a.id));
+  const list = $derived([...jobs.values()]);
+  const running = $derived(list.filter((j) => j.status === 'running'));
+  const upNext = $derived(list.filter((j) => j.status === 'queued').sort((a, b) => a.order - b.order));
+  const finished = $derived(list.filter((j) => !['queued', 'running'].includes(j.status)).sort((a, b) => (b.finished ?? b.id) - (a.finished ?? a.id)));
   const current = $derived(selected != null ? jobs.get(selected) : null);
 
   async function select(id) {
@@ -68,6 +76,7 @@
     try {
       const job = await api.submit(kind, day, cams);
       select(job.id);
+      if (kind === 'run') error = '';
     } catch (err) {
       error = err.message;
     }
@@ -88,33 +97,70 @@
   <header>
     <div>
       <h1>Jobs</h1>
-      <div class="muted sub">One job runs at a time; analysis uses the GPU.</div>
+      <div class="muted sub">Two lanes run side by side: downloading, and processing (finding objects, rendering). A day's steps always run in order.</div>
     </div>
   </header>
 
   <div class="grid">
-    <section aria-label="Job list" class="jobs">
+    <section aria-label="Jobs" class="jobs">
+      {#snippet card(j, actions)}
+        <div class="job" class:sel={j.id === selected}>
+          <button class="pick" onclick={() => select(j.id)} aria-label="Show log for job {j.id}">
+            <div class="row">
+              <span class="title">{TITLE[j.kind] ?? j.kind}</span>
+              <span class="mono muted">{j.day}</span>
+              {#if j.group}<span class="small dim">part of job {j.group}</span>{/if}
+              <span class="badge {STATUS_CLS[j.status]} push">{j.status}</span>
+            </div>
+            <div class="row small muted">
+              <span>{j.cameras.join(', ')}</span>
+              <span class="push mono">{elapsed(j)}</span>
+            </div>
+            {#if j.status === 'running'}
+              <div class="bar"><div style:width="{Math.round((j.progress?.frac ?? 0) * 100)}%"></div></div>
+              <div class="small muted">{progressText(j.progress) || 'working…'}</div>
+              {#if j.status_line}<div class="small mono status">{j.status_line}</div>{/if}
+            {:else if j.status === 'queued' && j.waiting}
+              <div class="small waiting">{j.waiting}</div>
+            {/if}
+          </button>
+          {#if actions}<div class="actions">{@render actions(j)}</div>{/if}
+        </div>
+      {/snippet}
+
+      {#snippet queuedActions(j)}
+        <button class="btn icon-btn mini" aria-label="Move job {j.id} up" disabled={upNext[0]?.id === j.id} onclick={() => api.move(j.id, -1)}>↑</button>
+        <button class="btn icon-btn mini" aria-label="Move job {j.id} down" disabled={upNext.at(-1)?.id === j.id} onclick={() => api.move(j.id, 1)}>↓</button>
+        <button class="btn quiet mini" onclick={() => api.cancel(j.id)}>Cancel</button>
+      {/snippet}
+
+      {#snippet finishedActions(j)}
+        {#if j.status === 'failed' || j.status === 'cancelled'}
+          <button class="btn quiet mini" onclick={() => api.retry(j.id)}>Retry</button>
+        {/if}
+      {/snippet}
+
       {#if !list.length}
         <div class="empty panel">No jobs yet. Start one on the right.</div>
       {/if}
-      {#each list as j (j.id)}
-        <button class="job" class:sel={j.id === selected} onclick={() => select(j.id)}>
-          <div class="row">
-            <span class="title">{KINDS.find((k) => k.id === j.kind)?.label.split(' (')[0] ?? j.kind}</span>
-            <span class="mono muted">{j.day}</span>
-            <span class="badge {STATUS_CLS[j.status]} push">{j.status}</span>
-          </div>
-          <div class="row small muted">
-            <span>{j.cameras.join(', ')}</span>
-            <span class="push mono">{elapsed(j)}</span>
-          </div>
-          {#if j.status === 'running'}
-            <div class="bar"><div style:width="{Math.round((j.progress?.frac ?? 0) * 100)}%"></div></div>
-            <div class="small muted">{progressText(j.progress) || 'working…'}</div>
-            {#if j.status_line}<div class="small mono status">{j.status_line}</div>{/if}
-          {/if}
-        </button>
-      {/each}
+
+      {#if list.length}
+        <h2 class="sec">Running</h2>
+        {#each LANES as lane}
+          {@const r = running.find((j) => lane.kinds.includes(j.kind))}
+          {#if r}{@render card(r, null)}{:else}<div class="idle small dim">{lane.label}: idle</div>{/if}
+        {/each}
+      {/if}
+
+      {#if upNext.length}
+        <h2 class="sec">Up next</h2>
+        {#each upNext as j (j.id)}{@render card(j, queuedActions)}{/each}
+      {/if}
+
+      {#if finished.length}
+        <h2 class="sec">Finished</h2>
+        {#each finished.slice(0, 20) as j (j.id)}{@render card(j, finishedActions)}{/each}
+      {/if}
     </section>
 
     <aside class="side">
@@ -123,7 +169,7 @@
         <div class="field"><label for="day">Day</label><input id="day" type="date" bind:value={day} required /></div>
         <div class="field">
           <div class="lab"><label for="kind">What to do</label>
-            <InfoTip text="Everything downloads the day from the NVR, finds moving objects, then renders the videos and stills. Run a single step to redo just that part, for example re-render after changing styles in Settings." /></div>
+            <InfoTip text="Everything queues three jobs for the day: download from the NVR, find moving objects, and render the videos and stills. They run in that order, but a download can run alongside another day's processing. Pick a single step to redo just that part, for example re-render after changing styles in Settings." /></div>
           <select id="kind" bind:value={kind}>{#each KINDS as k}<option value={k.id}>{k.label}</option>{/each}</select>
         </div>
         <fieldset>
@@ -162,9 +208,17 @@
   .sub { font-size: 13px; }
   .grid { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 20px; align-items: start; }
   .jobs { display: flex; flex-direction: column; gap: 10px; }
-  .job { text-align: left; padding: 14px 16px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line);
-         display: flex; flex-direction: column; gap: 8px; }
+  .job { display: flex; align-items: stretch; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); }
   .job.sel { border-color: var(--accent); }
+  .pick { flex: 1; min-width: 0; text-align: left; padding: 14px 16px; border: 0; background: transparent;
+          display: flex; flex-direction: column; gap: 8px; border-radius: 12px; }
+  .actions { display: flex; align-items: center; gap: 6px; padding: 0 12px; }
+  .mini { min-height: 36px; padding: 0 10px; font-size: 13px; }
+  .icon-btn.mini { width: 36px; padding: 0; }
+  .sec { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-top: 6px; }
+  .idle { padding: 12px 16px; border-radius: 12px; border: 1px dashed var(--line); }
+  .waiting { color: var(--warn); }
+  .dim { color: var(--dim); }
   .row { display: flex; align-items: center; gap: 12px; }
   .title { font-weight: 500; }
   .push { margin-left: auto; }

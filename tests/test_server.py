@@ -181,20 +181,93 @@ def test_area_query(env):
 def test_queue_survives_restart(env, tmp_path):
     import asyncio
 
-    import reolapse.server.jobs as jobs_mod
-
     async def scenario():
         q1 = JobQueue(fake_command)
-        a = q1.submit("fetch", "2026-09-30", ["Garage"])
-        b = q1.submit("run", "2026-09-29", ["Garage"])
+        (a,) = q1.submit("fetch", "2026-09-30", ["Garage"])
         a.status = "running"  # pretend the server died mid-job
+        everything = q1.submit("run", "2026-09-29", ["Garage"])
+        assert [j.kind for j in everything] == ["fetch", "analyze", "render"]
+        assert {j.group for j in everything} == {everything[0].id}
+        for t in list(q1._tasks):
+            t.cancel()
         q1._save()
         q2 = JobQueue(fake_command)
         q2._restore()
-        assert {j.id: j.status for j in q2.jobs.values()} == {a.id: "queued", b.id: "queued"}
-        assert [q2._pending.get_nowait().id, q2._pending.get_nowait().id] == [a.id, b.id]
-        assert q2.submit("render", "2026-09-28", ["Garage"]).id == b.id + 1
+        assert {j.id: j.status for j in q2.jobs.values()}[a.id] == "queued"
         assert any("resuming" in line for line in q2.jobs[a.id].log)
+        assert q2.submit("render", "2026-09-28", ["Garage"])[0].id == everything[-1].id + 1
+
+    asyncio.run(scenario())
+
+
+def sleepy_command(job):
+    """Fake pipeline step: sleeps options['sleep'] seconds, exits with options['exit']."""
+    import sys
+    secs = float(job.options.get("sleep", 0.3))
+    code = int(job.options.get("exit", 0)) if job.kind == job.options.get("fail_kind", job.kind) else 0
+    return [sys.executable, "-c", f"import time,sys; time.sleep({secs}); sys.exit({code})"]
+
+
+async def _until(cond, timeout=10):
+    import asyncio
+    import time as _t
+    end = _t.time() + timeout
+    while not cond():
+        assert _t.time() < end, "timed out"
+        await asyncio.sleep(0.02)
+
+
+def test_lanes_run_in_parallel_but_days_keep_step_order(env):
+    import asyncio
+
+    async def scenario():
+        q = JobQueue(sleepy_command)
+        q.start()
+        fa, aa, ra = q.submit("run", "2026-09-30", ["Garage"], {"sleep": 0.4})
+        (fb,) = q.submit("fetch", "2026-09-29", ["Garage"], {"sleep": 0.6})
+        await asyncio.sleep(0.05)
+        assert fa.status == "running" and aa.status == "queued" and fb.status == "queued"
+        assert "download" in aa.waiting and "next in the download lane" in fb.waiting
+        await _until(lambda: fa.status == "done")
+        await _until(lambda: aa.status == "running")
+        assert fb.status == "running"  # Sep 29 downloads while Sep 30 is being analyzed
+        await _until(lambda: ra.status == "done" and fb.status == "done")
+        assert ra.started >= aa.finished
+
+    asyncio.run(scenario())
+
+
+def test_failure_blocks_later_steps_until_retry(env):
+    import asyncio
+
+    async def scenario():
+        q = JobQueue(sleepy_command)
+        q.start()
+        f, a, r = q.submit("run", "2026-09-30", ["Garage"], {"sleep": 0.1, "exit": 1, "fail_kind": "fetch"})
+        await _until(lambda: f.status == "failed")
+        await asyncio.sleep(0.1)
+        assert a.status == "queued" and "retry it" in a.waiting
+        f.options = {"sleep": 0.1}
+        q.retry(f.id)
+        await _until(lambda: r.status == "done")
+        assert a.status == "done"
+
+    asyncio.run(scenario())
+
+
+def test_move_reorders_queued_jobs(env):
+    import asyncio
+
+    async def scenario():
+        q = JobQueue(sleepy_command)
+        q.start()
+        (busy,) = q.submit("analyze", "2026-09-01", ["Garage"], {"sleep": 0.5})  # occupies the process lane
+        (x,) = q.submit("render", "2026-09-02", ["Garage"], {"sleep": 0.05})
+        (y,) = q.submit("render", "2026-09-03", ["Garage"], {"sleep": 0.05})
+        q.move(y.id, -1)
+        assert y.order < x.order
+        await _until(lambda: x.status == "done" and y.status == "done")
+        assert y.started < x.started
 
     asyncio.run(scenario())
 

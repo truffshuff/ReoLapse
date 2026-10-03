@@ -23,6 +23,8 @@ export const api = {
   job: (id) => request('GET', `/api/jobs/${id}`),
   submit: (kind, day, cameras, options = {}) => request('POST', '/api/jobs', { kind, day, cameras, options }),
   cancel: (id) => request('POST', `/api/jobs/${id}/cancel`),
+  retry: (id) => request('POST', `/api/jobs/${id}/retry`),
+  move: (id, delta) => request('POST', `/api/jobs/${id}/move?delta=${delta}`),
   settings: () => request('GET', '/api/settings'),
   saveSettings: (patch) => request('PUT', '/api/settings', patch),
   nvr: () => request('GET', '/api/nvr'),
