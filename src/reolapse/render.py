@@ -15,6 +15,7 @@ import numpy as np
 
 from .analyze import BG_SLOT
 from .config import DayPaths
+from .progress import emit
 
 CATEGORY_BGR = {"person": (40, 150, 255), "vehicle": (255, 180, 50), "animal": (80, 220, 80)}
 
@@ -280,6 +281,7 @@ def render_video(paths: DayPaths, tubes: list[Tube], bgs: Backgrounds, *, style:
         enc.stdin.write(canvas.tobytes())
         if k % 200 == 0:
             print(f"\r  rendering {k}/{nframes}", end="", flush=True)
+            emit("render", k / max(nframes, 1), paths.camera, f"{style} video")
     enc.stdin.close()
     enc.wait()
     # Sidecar for the app: maps time of day <-> video time (day_t = video_t / length * 86400).

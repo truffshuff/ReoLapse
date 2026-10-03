@@ -20,6 +20,7 @@ import cv2
 import numpy as np
 
 from . import tube_index
+from .progress import emit
 from .config import CATEGORIES, MODEL_DIR, DayPaths
 from .media import Recording, day_seconds, frames, keyframe_samples, load_recordings, prefetch
 
@@ -75,6 +76,7 @@ def build_backgrounds(paths: DayPaths, recs: list[Recording], workers: int = 4) 
             for slot, samples in partial.items():
                 leftovers.setdefault(slot, []).extend(samples)
             print(f"\r  backgrounds: {i}/{len(recs)} files", end="", flush=True)
+            emit("backgrounds", i / len(recs), paths.camera, f"file {i} of {len(recs)}")
     for slot, samples in leftovers.items():
         write(slot, samples)
     written = len(list(out.glob("*.jpg")))
@@ -283,6 +285,8 @@ def detect_tubes(paths: DayPaths, recs: list[Recording], windows, fps: float, mo
     def report(cur: float, wi: int):
         el = time.monotonic() - t_start
         eta = el / cur * (total - cur) if cur else 0
+        emit("analyze", cur / total if total else 1.0, paths.camera,
+             f"{sum(stats.values())} objects · about {eta / 60:.0f} min left")
         print(f"\r  window {wi + 1}/{len(windows)}  {cur / 60:6.1f}/{total / 60:.1f} min of footage  "
               f"yolo {yolo_frames}/{all_frames} frames  tubes {sum(stats.values())}  "
               f"elapsed {el / 60:4.1f}m eta {eta / 60:4.1f}m   ", end="", flush=True)

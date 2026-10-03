@@ -12,6 +12,7 @@ from pathlib import Path
 from . import nvr as nvrmod
 from .config import DayPaths
 from .media import is_fragmented, remux
+from .progress import emit
 
 LOCAL_TMP = Path(tempfile.gettempdir()) / "reolapse"
 
@@ -59,9 +60,10 @@ async def fetch_camera(nvr, camera: str, day: date, stream: str) -> None:
             continue
         t0 = time.monotonic()
 
-        def progress(n, i=i, name=dest.name):
+        def progress(n, i=i, name=dest.name, total=f.size):
             sys.stdout.write(f"\r  [{i}/{len(files)}] {name} {n / 1e6:7.0f} MB")
             sys.stdout.flush()
+            emit("download", (i - 1 + min(1.0, n / max(total, 1))) / len(files), camera, f"file {i} of {len(files)}")
 
         # Download to local disk, then remux (lossless) onto the share as an indexed MP4.
         tmp = LOCAL_TMP / dest.name
