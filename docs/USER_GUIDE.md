@@ -109,7 +109,8 @@ its analysis waits for its download, its render for its analysis. A waiting job 
 
 - **Up next**: ↑ ↓ reorder queued jobs; **Cancel** removes one.
 - **Finished**: **Retry** re-queues a failed or cancelled job. Work already done is skipped (finished
-  downloads are kept; analysis continues from its last checkpoint).
+  downloads are kept; analysis continues from its last checkpoint). **Remove** takes a job (and its log)
+  off the list; **Clear finished** removes them all. Downloads, results and videos aren't touched.
 - **Pause queue**: stops running jobs immediately and starts nothing new until **Resume queue**. Nothing
   is lost: downloads keep every finished file, and object finding saves a checkpoint every two minutes
   of footage and continues from there.

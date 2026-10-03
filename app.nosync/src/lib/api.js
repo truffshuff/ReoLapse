@@ -27,6 +27,8 @@ export const api = {
   queue: () => request('GET', '/api/queue'),
   pauseQueue: () => request('POST', '/api/queue/pause'),
   resumeQueue: () => request('POST', '/api/queue/resume'),
+  remove: (id) => request('DELETE', `/api/jobs/${id}`),
+  clearFinished: () => request('DELETE', '/api/jobs'),
   move: (id, delta) => request('POST', `/api/jobs/${id}/move?delta=${delta}`),
   settings: () => request('GET', '/api/settings'),
   saveSettings: (patch) => request('PUT', '/api/settings', patch),
@@ -50,10 +52,11 @@ export const media = {
 };
 
 /** Subscribe to job events. Returns an unsubscribe function. */
-export function onJobEvents({ snapshot, job, queue }) {
+export function onJobEvents({ snapshot, job, queue, removed }) {
   const es = new EventSource('/api/events');
   es.addEventListener('snapshot', (e) => snapshot?.(JSON.parse(e.data)));
   es.addEventListener('job', (e) => job?.(JSON.parse(e.data)));
   es.addEventListener('queue', (e) => queue?.(JSON.parse(e.data)));
+  es.addEventListener('removed', (e) => removed?.(JSON.parse(e.data)));
   return () => es.close();
 }

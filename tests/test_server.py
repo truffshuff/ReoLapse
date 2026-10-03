@@ -348,3 +348,39 @@ def test_nvr_login_saved_to_settings_and_keychain(env, monkeypatch):
     monkeypatch.setenv("REOLINK_PASSWORD", "envpw")
     from reolapse import nvr as nvrmod
     assert nvrmod.credentials()["source"] == ".env"
+
+
+def test_move_is_published_while_paused(env):
+    import asyncio
+
+    async def scenario():
+        q = JobQueue(sleepy_command)
+        q.start()
+        q.pause("you paused it")
+        (x,) = q.submit("render", "2026-09-02", ["Garage"])
+        (y,) = q.submit("render", "2026-09-03", ["Garage"])
+        events = q.subscribe()
+        q.move(y.id, -1)
+        seen = {}
+        while not events.empty():
+            e = events.get_nowait()
+            if "job" in e:
+                seen[e["job"]["id"]] = e["job"]["order"]
+        assert seen[y.id] < seen[x.id]
+
+    asyncio.run(scenario())
+
+
+def test_remove_finished_jobs(env):
+    with TestClient(create_app(JobQueue(fake_command))) as client:
+        a = client.post("/api/jobs", json={"kind": "render", "day": "2026-09-02", "cameras": ["Garage"]}).json()
+        b = client.post("/api/jobs", json={"kind": "render", "day": "2026-09-03", "cameras": ["Garage"]}).json()
+        for _ in range(100):
+            if all(j["status"] == "done" for j in client.get("/api/jobs").json()):
+                break
+            import time; time.sleep(0.05)
+        assert client.delete(f"/api/jobs/{a['id']}").json() == {"removed": [a["id"]]}
+        assert [j["id"] for j in client.get("/api/jobs").json()] == [b["id"]]
+        assert client.delete("/api/jobs").json() == {"removed": [b["id"]]}
+        assert client.get("/api/jobs").json() == []
+        assert client.delete("/api/jobs/99").status_code == 404

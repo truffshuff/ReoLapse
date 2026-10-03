@@ -305,6 +305,20 @@ def create_app(queue: JobQueue | None = None, updater=None) -> FastAPI:
         return FileResponse(f, media_type="text/plain; charset=utf-8",
                             filename=f"reolapse-job-{job.id}-{job.kind}-{job.day}.log")
 
+    @app.delete("/api/jobs/{job_id}")
+    async def remove_job(job_id: int):
+        """Remove a finished job from the list (and its log)."""
+        _job(job_id)
+        try:
+            return {"removed": queue.remove([job_id])}
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+
+    @app.delete("/api/jobs")
+    async def clear_finished():
+        """Remove every finished job (done, failed or cancelled)."""
+        return {"removed": queue.remove()}
+
     @app.post("/api/jobs/{job_id}/cancel")
     async def cancel(job_id: int):
         if job_id not in queue.jobs:
@@ -325,6 +339,8 @@ def create_app(queue: JobQueue | None = None, updater=None) -> FastAPI:
                         event = await asyncio.wait_for(q.get(), timeout=15)
                         if "queue" in event:
                             yield f"event: queue\ndata: {json.dumps(event['queue'])}\n\n"
+                        elif "removed" in event:
+                            yield f"event: removed\ndata: {json.dumps(event['removed'])}\n\n"
                         else:
                             yield f"event: job\ndata: {json.dumps(event)}\n\n"
                     except asyncio.TimeoutError:

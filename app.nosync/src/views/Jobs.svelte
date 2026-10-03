@@ -65,6 +65,11 @@
           if (atBottom) { await tick(); logEl?.scrollTo(0, logEl.scrollHeight); }
         }
       },
+      removed: (ids) => {
+        ids.forEach((id) => jobs.delete(id));
+        jobs = new Map(jobs);
+        if (ids.includes(selected)) { selected = null; log = []; }
+      },
     });
     const timer = setInterval(() => (now = Date.now() / 1000), 1000);
     return () => { stop(); clearInterval(timer); };
@@ -155,6 +160,7 @@
         {#if j.status === 'failed' || j.status === 'cancelled'}
           <button class="btn quiet mini" onclick={() => api.retry(j.id)}>Retry</button>
         {/if}
+        <button class="btn quiet mini" aria-label="Remove job {j.id} from the list" onclick={() => api.remove(j.id)}>Remove</button>
       {/snippet}
 
       {#if !list.length}
@@ -175,7 +181,8 @@
       {/if}
 
       {#if finished.length}
-        <h2 class="sec">Finished</h2>
+        <div class="sec-row"><h2 class="sec">Finished</h2>
+          <button class="btn quiet mini" onclick={() => confirm(`Remove all ${finished.length} finished jobs and their logs from the list? Downloads, results and videos are not affected.`) && api.clearFinished()}>Clear finished</button></div>
         {#each finished.slice(0, 20) as j (j.id)}{@render card(j, finishedActions)}{/each}
       {/if}
     </section>
@@ -246,6 +253,8 @@
   .mini { min-height: 36px; padding: 0 10px; font-size: 13px; }
   .icon-btn.mini { width: 36px; padding: 0; }
   .sec { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-top: 6px; }
+  .sec-row { display: flex; align-items: center; justify-content: space-between; margin-top: 6px; }
+  .sec-row .sec { margin-top: 0; }
   .idle { padding: 12px 16px; border-radius: 12px; border: 1px dashed var(--line); }
   .waiting { color: var(--warn); }
   .dim { color: var(--dim); }

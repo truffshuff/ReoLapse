@@ -333,10 +333,30 @@ class JobQueue:
         queued.insert(max(0, min(len(queued) - 1, i + delta)), queued.pop(i))
         base = min(j.order for j in queued)
         for n, j in enumerate(queued):
-            j.order = base + n
+            if j.order != base + n:
+                j.order = base + n
+                self._publish(j)  # no log line marks a move, so tell the UI directly
         self._save()
         self._schedule()
         return job
+
+    def remove(self, job_ids: list[int] | None = None) -> list[int]:
+        """Forget finished jobs (all of them when job_ids is None), with their logs."""
+        ids = [i for i in (self.jobs if job_ids is None else job_ids)
+               if i in self.jobs and self.jobs[i].status not in ("queued", "running")]
+        if job_ids is not None and len(ids) != len(job_ids):
+            raise ValueError("only finished jobs can be removed")
+        for i in ids:
+            self.log_path(self.jobs.pop(i)).unlink(missing_ok=True)
+        if ids:
+            self._save()
+            for q in list(self._listeners):
+                try:
+                    q.put_nowait({"removed": ids})
+                except asyncio.QueueFull:
+                    pass
+            self._schedule()  # a removed failed step no longer holds back the day's later steps
+        return ids
 
     def subscribe(self) -> asyncio.Queue:
         q: asyncio.Queue = asyncio.Queue(maxsize=1000)
