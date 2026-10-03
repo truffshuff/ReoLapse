@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 import time
 from datetime import date
 from pathlib import Path
@@ -35,12 +36,39 @@ def _outputs(paths: DayPaths) -> list[dict]:
     return sorted(seen.values(), key=lambda o: o["name"])
 
 
+_refreshing: set[tuple[str, str]] = set()
+_lock = threading.Lock()
+
+
 def camera_day(camera: str, day: str, fresh: bool = False) -> dict:
-    """Status and summary numbers for one camera-day (cached briefly; the share is slow)."""
+    """Status and summary numbers for one camera-day.
+
+    Stale-while-revalidate: a cached answer is returned at once and refreshed in the background
+    when older than CACHE_SECONDS, so the app stays responsive while a job saturates the share.
+    """
     key = (camera, day)
     hit = _cache.get(key)
-    if hit and not fresh and time.monotonic() - hit[0] < CACHE_SECONDS:
+    if hit and not fresh:
+        if time.monotonic() - hit[0] >= CACHE_SECONDS:
+            with _lock:
+                start = key not in _refreshing
+                _refreshing.add(key)
+            if start:
+                threading.Thread(target=_refresh, args=(camera, day), daemon=True).start()
         return hit[1]
+    return _scan(camera, day)
+
+
+def _refresh(camera: str, day: str) -> None:
+    try:
+        _scan(camera, day)
+    finally:
+        with _lock:
+            _refreshing.discard((camera, day))
+
+
+def _scan(camera: str, day: str) -> dict:
+    key = (camera, day)
     paths = DayPaths(camera, date.fromisoformat(day))
     recordings = json.loads(paths.files_index.read_text()) if paths.files_index.exists() else []
     counts = {"person": 0, "vehicle": 0, "animal": 0}
@@ -73,9 +101,24 @@ def camera_day(camera: str, day: str, fresh: bool = False) -> dict:
     return info
 
 
+_day_list: dict[tuple[str, ...], tuple[float, list[str]]] = {}
+
+
+def _list_days(cameras: list[str]) -> list[str]:
+    found = sorted(set().union(*(_day_dirs(c) for c in cameras)) if cameras else set(), reverse=True)
+    _day_list[tuple(cameras)] = (time.monotonic(), found)
+    return found
+
+
 def days(cameras: list[str]) -> list[dict]:
-    """Every day any configured camera has data for, newest first."""
-    all_days = sorted(set().union(*(_day_dirs(c) for c in cameras)) if cameras else set(), reverse=True)
+    """Every day any configured camera has data for, newest first (directory listing cached the same way)."""
+    hit = _day_list.get(tuple(cameras))
+    if hit is None:
+        all_days = _list_days(cameras)
+    else:
+        all_days = hit[1]
+        if time.monotonic() - hit[0] >= CACHE_SECONDS:
+            threading.Thread(target=_list_days, args=(cameras,), daemon=True).start()
     return [{"day": d, "cameras": [camera_day(c, d) for c in cameras]} for d in all_days]
 
 

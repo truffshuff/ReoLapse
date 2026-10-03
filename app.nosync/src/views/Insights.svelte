@@ -12,6 +12,7 @@
   ];
 
   let days = $state([]);
+  let loaded = $state(false);
   let day = $state(params.day ?? '');
   let camera = $state(params.camera ?? '');
   let view = $state('trails');
@@ -23,6 +24,7 @@
 
   onMount(async () => {
     days = await api.days();
+    loaded = true;
     if (!day || !days.some((d) => d.day === day)) day = days.find((d) => d.cameras.some((c) => c.outputs.length))?.day ?? days[0]?.day ?? '';
     if (!camera) camera = cameras.find((c) => c.outputs.length)?.camera ?? cameras[0]?.camera ?? '';
   });
@@ -49,6 +51,8 @@
   <section class="stage">
     {#if cam && available.has(current.file)}
       <img src={media.out(day, camera, current.file)} alt="{current.label} for {camera}" />
+    {:else if !loaded}
+      <div class="empty">Loading…</div>
     {:else}
       <div class="empty">Not rendered yet for this camera and day.</div>
     {/if}

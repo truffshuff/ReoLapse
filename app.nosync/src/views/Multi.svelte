@@ -12,6 +12,7 @@
   let { params } = $props();
 
   let days = $state([]);
+  let loaded = $state(false);
   let day = $state(params.day ?? '');
   let at = $state(params.t ? '' : '16:15');
   let t = $state(params.t ? Number(params.t) : null);
@@ -24,6 +25,7 @@
 
   onMount(async () => {
     days = await api.days();
+    loaded = true;
     if (!day || !days.some((d) => d.day === day)) day = days[0]?.day ?? '';
     if (t == null) load();
   });
@@ -64,6 +66,7 @@
     </div>
   </header>
 
+  {#if !loaded}<div class="empty">Loading…</div>{/if}
   <section class="grid">
     {#each cameras as c (c.camera)}
       <figure>

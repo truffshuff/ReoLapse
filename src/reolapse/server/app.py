@@ -263,6 +263,7 @@ def create_app(queue: JobQueue | None = None) -> FastAPI:
             raise HTTPException(400, str(e))
         config.WORK_ROOT = config._work_root()  # a changed working folder applies without a restart
         library._cache.clear()
+        library._day_list.clear()
         return saved
 
     @app.get("/api/models")

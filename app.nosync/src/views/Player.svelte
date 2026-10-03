@@ -12,6 +12,7 @@
   let { params } = $props();
 
   let days = $state([]);
+  let loaded = $state(false);
   let day = $state(params.day ?? '');
   let camera = $state(params.camera ?? '');
   let info = $state(null);
@@ -39,6 +40,7 @@
 
   onMount(async () => {
     days = await api.days();
+    loaded = true;
     if (!day || !days.some((d) => d.day === day)) {
       const withVideo = days.find((d) => d.cameras.some((c) => c.status === 'rendered')) ?? days[0];
       day = withVideo?.day ?? '';
@@ -160,6 +162,8 @@
              onloadeddata={() => (synState = 'ready')} onerror={() => (synState = 'error')}></video>
       <VideoState status={synState} busy={jobState.downloading} />
       <RegionOverlay bind:regions {drawing} />
+    {:else if !loaded || (camera && !info)}
+      <div class="empty">Loading…</div>
     {:else}
       <div class="empty">No synopsis rendered for this camera and day yet. Run it from <a href="#/jobs">Jobs</a>.</div>
     {/if}
