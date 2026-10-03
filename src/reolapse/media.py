@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
+from collections import deque
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -104,17 +105,37 @@ def _ffmpeg_frames(rec: Recording, args_in: list[str], vf: str) -> Iterator[np.n
         vf = f"{vf},scale_vt=w={w}:h={h},hwdownload,format=nv12"
     cmd = ["ffmpeg", "-v", "error", *args_in, "-i", str(rec.path),
            "-an", "-vf", vf, "-f", "rawvideo", "-pix_fmt", "bgr24", "-"]
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=w * h * 3 * 4)
+    # ffmpeg's messages are captured, not passed through: when the job is stopped (pause, cancel)
+    # ffmpeg complains about the closed pipe, which is noise. They're reported only if ffmpeg
+    # fails while we're still reading -- a real decode problem, e.g. a damaged recording.
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=w * h * 3 * 4)
+    messages: deque[str] = deque(maxlen=12)
+    reader = threading.Thread(target=lambda: messages.extend(
+        line.decode(errors="replace").rstrip() for line in proc.stderr), daemon=True)
+    reader.start()
     size = w * h * 3
+    finished = False
     try:
         while True:
             buf = proc.stdout.read(size)
             if len(buf) < size:
+                finished = True
                 break
             yield np.frombuffer(buf, np.uint8).reshape(h, w, 3)
     finally:
+        if finished:  # reached the end of what ffmpeg sent: did it end well?
+            try:
+                code = proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                code = None
+            reader.join(timeout=2)
+            if code not in (0, None):
+                detail = "; ".join(m for m in messages if m) or f"exit code {code}"
+                print(f"\n   warning: couldn't read part of {rec.path.name} (ffmpeg: {detail}); "
+                      "the scan continues with the next part", flush=True)
         proc.stdout.close()
-        proc.kill()
+        if proc.poll() is None:
+            proc.kill()
         proc.wait()
 
 
