@@ -71,6 +71,17 @@ def default_command(job: Job) -> list[str]:
     return [sys.executable, "-m", "reolapse", *pipeline_args(job, settings_mod.load())]
 
 
+async def _keep_awake_while(pid: int) -> None:
+    """macOS: stop idle sleep until the job process exits (caffeinate exits with it)."""
+    if sys.platform != "darwin":
+        return
+    try:
+        await asyncio.create_subprocess_exec("caffeinate", "-i", "-w", str(pid),
+                                             stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+    except OSError:
+        pass
+
+
 class JobQueue:
     def __init__(self, command_for: Callable[[Job], list[str]] = default_command):
         self.command_for = command_for
@@ -147,6 +158,7 @@ class JobQueue:
         try:
             job.proc = await asyncio.create_subprocess_exec(
                 *self.command_for(job), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, env=env)
+            await _keep_awake_while(job.proc.pid)
             buf = ""
             while chunk := await job.proc.stdout.read(4096):
                 buf += chunk.decode(errors="replace")
