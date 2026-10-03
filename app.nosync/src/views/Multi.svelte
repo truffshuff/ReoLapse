@@ -44,7 +44,7 @@
   // Fetch each analyzed camera's object list once per day (the server keeps an index; this is cheap).
   $effect(() => {
     const d = day, cams = cameras.filter((c) => c.status === 'analyzed' || c.status === 'rendered').map((c) => c.camera);
-    if (!d || objectsFor === d) return;
+    if (!d || !loaded || objectsFor === d) return; // wait for the day list, or we'd remember "no cameras"
     objectsFor = d;
     objects = {};
     loadingEvents = true;
