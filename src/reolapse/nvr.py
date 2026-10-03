@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
+import re
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -56,27 +58,56 @@ async def recording_files(nvr: Host, channel: int, start: datetime, end: datetim
     return sorted(files, key=lambda f: f.start_time)
 
 
-async def download_file(nvr: Host, channel: int, vod: VOD_file, stream: str, dest: Path, progress=None) -> Path:
+class DownloadError(RuntimeError):
+    pass
+
+
+def _redact(text: str) -> str:
+    """Keep NVR credentials and session tokens out of logs."""
+    return re.sub(r"(token|password|user)=[^&\s']*", r"\1=***", text)
+
+
+async def download_file(nvr: Host, channel: int, vod: VOD_file, stream: str, dest: Path, progress=None,
+                        attempts: int = 3, log=print) -> Path:
     """Download one recording file by its NVR name. Writes to .part and renames when complete.
 
     The RLN16 rejects NvrDownload-prepared fragments and FLV playback, but serves whole
     recording files via cmd=Download with the search result's name.
+
+    Retries: the NVR's session token lapses after about an hour (it then answers 404/401), and
+    Wi-Fi drops happen, so a failed attempt logs in afresh and tries again.
     """
-    _, url = await nvr.get_vod_source(channel, vod.file_name, stream, VodRequestType.DOWNLOAD)
     dest.parent.mkdir(parents=True, exist_ok=True)
     part = dest.with_suffix(dest.suffix + ".part")
-    n = 0
-    async with httpx.AsyncClient(timeout=httpx.Timeout(60, read=120)) as client:
-        async with client.stream("GET", url) as r:
-            r.raise_for_status()
-            with open(part, "wb") as fh:
-                async for chunk in r.aiter_bytes(1 << 20):
-                    fh.write(chunk)
-                    n += len(chunk)
-                    if progress:
-                        progress(n)
-    if n == 0:
-        part.unlink(missing_ok=True)
-        raise RuntimeError(f"empty download for {vod}")
-    part.rename(dest)
-    return dest
+    for attempt in range(1, attempts + 1):
+        try:
+            _, url = await nvr.get_vod_source(channel, vod.file_name, stream, VodRequestType.DOWNLOAD)
+            n = 0
+            async with httpx.AsyncClient(timeout=httpx.Timeout(60, read=120)) as client:
+                async with client.stream("GET", url) as r:
+                    if r.status_code != 200:
+                        raise DownloadError(f"the NVR answered {r.status_code} {r.reason_phrase}")
+                    with open(part, "wb") as fh:
+                        async for chunk in r.aiter_bytes(1 << 20):
+                            fh.write(chunk)
+                            n += len(chunk)
+                            if progress:
+                                progress(n)
+            if n == 0:
+                raise DownloadError("the NVR sent an empty file")
+            part.rename(dest)
+            return dest
+        except (DownloadError, httpx.HTTPError, OSError) as e:
+            part.unlink(missing_ok=True)
+            why = _redact(str(e)) or type(e).__name__
+            if attempt == attempts:
+                raise DownloadError(f"couldn't download {vod.start_time:%H:%M} after {attempts} tries: {why}") from None
+            wait = 10 * attempt
+            log(f"\n   download attempt {attempt} failed ({why}); logging in to the NVR again and retrying in {wait}s")
+            await asyncio.sleep(wait)
+            try:  # a fresh session: the usual cause is an expired token
+                await nvr.logout()
+                await nvr.login()
+            except Exception as le:
+                log(f"   (logging in again failed: {_redact(str(le))})")
+    raise AssertionError("unreachable")

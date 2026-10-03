@@ -60,3 +60,42 @@ def test_fetch_camera_downloads_remuxes_and_logs(tmp_path, monkeypatch, capsys, 
     # second run: everything already there
     asyncio.run(fetch.fetch_camera(None, "Garage", day, "main"))
     assert "already downloaded, skipping" in capsys.readouterr().out
+
+
+def test_download_retries_with_fresh_login(tmp_path, monkeypatch):
+    import httpx
+    from reolapse import nvr as nvrmod
+
+    calls = {"n": 0, "logins": 0}
+
+    class FakeNVR:
+        async def get_vod_source(self, ch, name, stream, kind):
+            return "video/mp4", "http://nvr.test/download?token=SECRET123"
+
+        async def logout(self):
+            pass
+
+        async def login(self):
+            calls["logins"] += 1
+
+    def handler(request):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return httpx.Response(404)  # expired session
+        return httpx.Response(200, content=b"x" * 1000)
+
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(nvrmod.httpx, "AsyncClient", lambda **kw: real_client(transport=httpx.MockTransport(handler)))
+    real_sleep = asyncio.sleep
+    monkeypatch.setattr(nvrmod.asyncio, "sleep", lambda s: real_sleep(0))
+    vod = SimpleNamespace(file_name="f", start_time=datetime(2026, 9, 29, 15, tzinfo=TZ))
+    logs = []
+    out = asyncio.run(nvrmod.download_file(FakeNVR(), 23, vod, "main", tmp_path / "a.mp4", log=logs.append))
+    assert out.read_bytes() == b"x" * 1000 and calls["logins"] == 1
+    assert "404" in logs[0] and "SECRET123" not in " ".join(logs)
+
+    calls["n"] = -10  # every try fails
+    monkeypatch.setattr(nvrmod.httpx, "AsyncClient", lambda **kw: real_client(transport=httpx.MockTransport(lambda r: httpx.Response(404))))
+    with pytest.raises(nvrmod.DownloadError) as err:
+        asyncio.run(nvrmod.download_file(FakeNVR(), 23, vod, "main", tmp_path / "b.mp4", log=logs.append))
+    assert "after 3 tries" in str(err.value) and "SECRET123" not in str(err.value)
