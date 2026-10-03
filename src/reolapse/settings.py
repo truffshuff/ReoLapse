@@ -20,6 +20,7 @@ DEFAULTS: dict = {
     "nightly": {"enabled": False, "time": "02:00"},
     "storage": {"work_root": "", "data_root": ""},  # empty = defaults (REOLAPSE_WORK / REOLAPSE_DATA override)
     "nvr": {"host": "", "user": "", "port": 80},  # the password lives in the system keychain, never here
+    "updates": {"repo": "truffshuff/ReoLapse", "check_on_launch": True},  # token: system keychain
     "streams": {},  # camera name -> "sub" (Fluent, default) or "main" (Clear)
 }
 

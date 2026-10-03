@@ -27,6 +27,7 @@
   let route = $state(parse());
   let activeJobs = $state(0);
   let nvrOk = $state(null);
+  let update = $state(null);
 
   onMount(() => {
     const onHash = () => (route = parse());
@@ -38,6 +39,8 @@
       job: (e) => { jobs.set(e.job.id, e.job); recount(); },
     });
     api.health().then((h) => (nvrOk = h.data_root_available)).catch(() => (nvrOk = false));
+    api.settings().then((st) => st.updates?.check_on_launch && api.update(true))
+      .then((u) => u?.newer && (update = u.latest.version)).catch(() => {});
     return () => { window.removeEventListener('hashchange', onHash); stop(); };
   });
 </script>
@@ -52,6 +55,7 @@
         {:else if item.id === 'jobs' && activeJobs}<span class="count mono">{activeJobs}</span>{/if}
       </a>
     {/each}
+    {#if update}<a class="update" href="#/settings">Update available: {update}</a>{/if}
     <div class="status">
       <div class="row"><span class="dot" style:background={nvrOk ? 'var(--ok)' : nvrOk === false ? 'var(--bad)' : 'var(--dim)'}></span>
         {nvrOk ? 'Storage connected' : nvrOk === false ? 'Storage unavailable' : 'Checking…'}</div>
@@ -85,6 +89,8 @@
     display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 0 12px; border-radius: 8px; color: var(--muted);
   }
   nav a:hover { color: var(--text); }
+  nav a.update { margin-top: auto; color: var(--accent-text); font-size: 13px; }
+  nav a.update + .status { margin-top: 0; }
   nav a.active { background: #1E2430; color: var(--text); font-weight: 500; }
   .count { margin-left: auto; font-size: 12px; padding: 2px 8px; border-radius: 10px; background: var(--accent-soft); color: var(--accent-text); }
   .count.paused { background: #3A3122; color: var(--warn); }

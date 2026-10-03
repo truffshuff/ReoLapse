@@ -45,6 +45,10 @@ class NvrLogin(BaseModel):
     password: str | None = None  # omitted/empty = keep the stored one
 
 
+class TokenBody(BaseModel):
+    token: str | None = None  # empty = remove
+
+
 class JobRequest(BaseModel):
     kind: str
     day: str
@@ -119,8 +123,11 @@ def _tube_index(paths: DayPaths) -> dict | None:
     return index
 
 
-def create_app(queue: JobQueue | None = None) -> FastAPI:
+def create_app(queue: JobQueue | None = None, updater=None) -> FastAPI:
+    from .updates import Updater
+
     queue = queue or JobQueue()
+    updater = updater or Updater(lambda: settings_mod.load()["updates"]["repo"])
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -351,6 +358,26 @@ def create_app(queue: JobQueue | None = None) -> FastAPI:
         extra = [{"file": f, "name": f, "speed": "", "about": "Custom model found in models/."}
                  for f in sorted(present - known)]
         return [{**m, "downloaded": m["file"] in present} for m in MODEL_CATALOG + extra]
+
+    # ---------------------------------------------------------------- updates
+    @app.get("/api/update")
+    async def update_status(check: bool = False, force: bool = False):
+        """Current/latest version; ?check=1 asks GitHub (at most hourly unless force=1)."""
+        return await updater.check(force=force) if check else updater.status()
+
+    @app.put("/api/update/token")
+    async def update_token(body: TokenBody):
+        from .updates import set_token
+
+        set_token(body.token)
+        return await updater.check(force=True) if body.token else updater.status()
+
+    @app.post("/api/update/download")
+    async def update_download():
+        try:
+            return updater.start_download()
+        except ValueError as e:
+            raise HTTPException(400, str(e))
 
     @app.get("/api/nvr")
     def nvr_info():

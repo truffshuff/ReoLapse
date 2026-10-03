@@ -34,6 +34,9 @@ export const api = {
   saveNvr: (login) => request('PUT', '/api/nvr', login),
   models: () => request('GET', '/api/models'),
   testNvr: () => request('POST', '/api/nvr/test'),
+  update: (check = false, force = false) => request('GET', `/api/update?check=${check ? 1 : 0}&force=${force ? 1 : 0}`),
+  saveUpdateToken: (token) => request('PUT', '/api/update/token', { token }),
+  downloadUpdate: () => request('POST', '/api/update/download'),
   objects: (day, cam, regions, categories = []) =>
     request('GET', `/api/days/${day}/${encodeURIComponent(cam)}/objects?regions=${encodeURIComponent(
       regions.map((r) => [r.x0, r.y0, r.x1, r.y1].map((v) => v.toFixed(4)).join(',')).join(';'))}&categories=${categories.join(',')}`),

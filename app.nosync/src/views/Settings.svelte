@@ -43,6 +43,7 @@
     perType: 'Each switch adds one more video per camera and day, in the first style above, containing only that kind of object. With fewer objects they are shorter, less crowded and quicker to render than the full video. The Player switches between them with Show.',
     work: 'Where backgrounds and object data are written and videos are rendered. These are many small, random reads and writes, so a folder on this Mac is much faster than the network share. Finished videos and stills are still copied to the archive, and days processed before you change this keep working from the share. About 1 GB per camera per day accumulates here.',
     archive: 'Where downloaded recordings, the NVR event lists and the finished videos and stills are kept: usually a folder on your NAS share, mounted on this Mac. Leave empty for the default. When it can\'t be reached, the job queue pauses itself.',
+    updates: 'Reolapse checks its GitHub releases for a newer version. The repository is private, so it needs a GitHub token that can read it; the token is stored in the macOS Keychain. Because the app isn\'t signed by Apple it can\'t replace itself: the new version is downloaded to your Downloads folder and opened, and you drag Reolapse into Applications (replace the old one). Your settings, login and processed days are kept.',
     nvr: 'The address and login of your Reolink NVR. Use a dedicated NVR user (viewing and playback is enough) whose password has no & # % or spaces; the NVR\'s web API breaks on those. The password is stored in the macOS Keychain, not in a file.',
   };
 
@@ -75,12 +76,49 @@
     }
   }
 
+  let upd = $state(null);
+  let token = $state('');
+  let updMsg = $state('');
+  let checking = $state(false);
+
+  async function checkUpdates() {
+    checking = true;
+    updMsg = '';
+    upd = await api.update(true, true).catch((e) => ({ ...upd, error: e.message }));
+    checking = false;
+  }
+
+  async function saveToken(value) {
+    updMsg = '';
+    try {
+      upd = await api.saveUpdateToken(value);
+      token = '';
+      updMsg = value ? 'Token saved in the system keychain.' : 'Token removed.';
+    } catch (e) {
+      updMsg = 'Not saved: ' + e.message;
+    }
+  }
+
+  async function downloadUpdate() {
+    try {
+      upd.download = await api.downloadUpdate();
+      while (upd.download.status === 'downloading') {
+        await new Promise((r) => setTimeout(r, 1000));
+        upd = await api.update();
+      }
+    } catch (e) {
+      updMsg = 'Download failed: ' + e.message;
+    }
+  }
+
+  const mb = (n) => (n / 1e6).toFixed(0) + ' MB';
+
   const dirty = $derived(s && saved && JSON.stringify(s) !== JSON.stringify(saved));
   const model = $derived(models.find((m) => m.file === s?.analysis.model));
   const size = $derived(SIZES.find((x) => x.value === Number(s?.analysis.imgsz)));
 
   onMount(async () => {
-    [s, health, nvr, models] = await Promise.all([api.settings(), api.health(), api.nvr(), api.models()]);
+    [s, health, nvr, models, upd] = await Promise.all([api.settings(), api.health(), api.nvr(), api.models(), api.update()]);
     setLoginFrom(nvr);
     saved = structuredClone($state.snapshot(s));
   });
@@ -283,6 +321,53 @@
         <div class="field"><label for="night-time">Start at</label><input id="night-time" type="time" bind:value={s.nightly.time} disabled={!s.nightly.enabled} /></div>
         <p class="desc">Saved now; the scheduler that acts on it arrives in a later update.</p>
       </section>
+
+      <section class="panel" id="updates" aria-labelledby="up-h">
+        <div class="row">
+          <h2 id="up-h">Updates</h2><InfoTip text={HELP.updates} />
+          <span class="small muted">This is version {upd?.current}</span>
+        </div>
+        {#if upd?.newer}
+          <div class="update">
+            <div class="row"><strong>Version {upd.latest.version} is available</strong>
+              {#if upd.latest.url}<a class="small" href={upd.latest.url} target="_blank" rel="noreferrer">on GitHub</a>{/if}</div>
+            {#if upd.latest.notes}<p class="desc notes">{upd.latest.notes}</p>{/if}
+            {#if upd.download.status === 'downloading'}
+              <progress max={upd.download.total || 1} value={upd.download.done}></progress>
+              <span class="small muted">Downloading {mb(upd.download.done)} of {mb(upd.download.total)}…</span>
+            {:else if upd.download.status === 'done'}
+              <p class="desc">Downloaded to <strong>{upd.download.path}</strong> and opened. Quit Reolapse (⌘Q; running jobs
+                continue next time), drag Reolapse onto Applications and choose <strong>Replace</strong>, then open it again.</p>
+            {:else if upd.latest.asset}
+              <div class="row"><button class="btn primary" onclick={downloadUpdate}>Download {upd.latest.version} ({mb(upd.latest.asset.size)})</button>
+                {#if upd.download.status === 'failed'}<span class="bad small">{upd.download.error}</span>{/if}</div>
+            {:else}
+              <p class="desc">This release has no Mac installer yet (it may still be building); check again in a few minutes.</p>
+            {/if}
+          </div>
+        {:else if upd?.latest && !upd.error}
+          <p class="desc">You have the latest version.</p>
+        {/if}
+        {#if upd?.error}<p class="desc bad-text">{upd.error}</p>{/if}
+        <div class="row">
+          <button class="btn" onclick={checkUpdates} disabled={checking || !upd?.token_set}>{checking ? 'Checking…' : 'Check for updates'}</button>
+          {#if upd?.checked_at}<span class="small muted">Last checked {new Date(upd.checked_at * 1000).toLocaleString()}</span>{/if}
+        </div>
+        <Switch label="Check when Reolapse opens" bind:checked={s.updates.check_on_launch} />
+        <div class="field">
+          <div class="lab"><label for="gh-token">GitHub token</label></div>
+          <div class="inline">
+            <input id="gh-token" type="password" bind:value={token} autocomplete="off"
+                   placeholder={upd?.token_set ? 'saved (paste a new one to replace)' : 'github_pat_…'} />
+            <button class="btn" onclick={() => saveToken(token)} disabled={!token.trim()}>Save token</button>
+            {#if upd?.token_set}<button class="btn" onclick={() => saveToken(null)}>Remove</button>{/if}
+          </div>
+          {#if updMsg}<span class="small muted">{updMsg}</span>{/if}
+        </div>
+        <p class="desc">Create one at <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noreferrer">GitHub → Fine-grained tokens</a>:
+          repository access <strong>Only select repositories → {upd?.repo}</strong>, permission <strong>Contents: Read-only</strong>.
+          It can read this one repository and nothing else.</p>
+      </section>
     </div>
   {/if}
 </div>
@@ -321,4 +406,8 @@
   .inline { display: flex; gap: 10px; }
   .inline input { flex: 1; min-width: 0; }
   input[type=range] { width: 100%; }
+  .update { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; }
+  .notes { white-space: pre-wrap; max-height: 160px; overflow: auto; }
+  .bad-text { color: var(--bad); }
+  progress { width: 100%; }
 </style>

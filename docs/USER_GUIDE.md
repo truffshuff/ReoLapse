@@ -6,7 +6,7 @@
 - [All cameras](#all-cameras)
 - [Insights](#insights)
 - [Jobs](#jobs): lanes, pausing, logs
-- [Settings](#settings): NVR, cameras and streams, analysis, rendering, storage
+- [Settings](#settings): NVR, cameras and streams, analysis, rendering, storage, updates
 - [How long things take](#how-long-things-take)
 - [Troubleshooting](#troubleshooting)
 
@@ -164,6 +164,23 @@ screen** (sets the automatic video length).
   folder on the Mac is much faster than the share. About 1 GB per camera-day accumulates there.
   Finished outputs are copied to the archive.
 
+### Updates
+
+Reolapse can check its GitHub releases for a newer version. The repository is private, so it needs a
+read-only token once:
+
+1. On GitHub open **Settings → Developer settings → Fine-grained tokens → Generate new token**
+   (or the link in the app).
+2. **Repository access**: *Only select repositories* → `truffshuff/ReoLapse`.
+   **Permissions**: *Contents: Read-only*. Pick an expiry (a year is fine).
+3. Paste it into Settings → **Updates** → **Save token**. It's kept in the macOS Keychain.
+
+With *Check when Reolapse opens* on, a newer version shows **Update available** in the sidebar.
+**Download** saves the `.dmg` to Downloads and opens it: quit Reolapse (⌘Q; queued and running jobs
+continue next time), drag Reolapse onto Applications, choose **Replace**, and open it again. The app
+isn't signed by Apple, so it can't replace itself. Settings, the NVR login and processed days are kept;
+the first launch of a new version rebuilds the engine (a minute or two).
+
 ## How long things take
 
 Measured on an M2 MacBook over Wi-Fi to an SMB share:
@@ -187,4 +204,5 @@ to the share makes Clear processing several times faster than Wi-Fi.
 | The queue says "paused: the network share isn't reachable" | Mount the share (Finder → Go → Connect to Server). The queue resumes by itself. |
 | A camera's day shows *Downloaded* but no objects | Its analysis hasn't run or failed: check Jobs → Finished, and **Retry**. |
 | No recordings for a day | The NVR only keeps footage for a few days (fewer with Clear on every camera); queue recent days. |
+| "GitHub refused the token" | It expired or lacks *Contents: Read-only* on the ReoLapse repository: make a new one (Settings → Updates). |
 | Moving/tracking camera looks wrong | Pan/tilt/zoom lenses aren't supported: switch them off in Settings → Cameras. |

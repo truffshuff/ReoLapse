@@ -35,6 +35,7 @@ async function get(pathname) {
 function toolEnv() {
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
+  env.REOLAPSE_APP_VERSION = app.getVersion(); // for "Check for updates"
   if (PACKAGED) {
     env.PATH = `${path.join(RES, 'bin')}:${env.PATH || '/usr/bin:/bin'}`; // bundled ffmpeg/ffprobe/uv
     env.REOLAPSE_UI_DIR = path.join(RES, 'ui');
