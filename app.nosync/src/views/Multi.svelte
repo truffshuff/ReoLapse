@@ -4,6 +4,10 @@
   import Icon from '../components/Icon.svelte';
   import { api, media } from '../lib/api.js';
   import { clock, longDay, parseClock } from '../lib/format.js';
+  import VideoState from '../components/VideoState.svelte';
+  import { jobState } from '../lib/busy.svelte.js';
+
+  const CLIP_SECONDS = 90; // shorter clips arrive sooner when the share is busy
 
   let { params } = $props();
 
@@ -13,6 +17,7 @@
   let t = $state(params.t ? Number(params.t) : null);
   let playing = $state(false);
   let videos = $state({});
+  let vstate = $state({}); // camera -> loading | ready | error
 
   const cameras = $derived(days.find((d) => d.day === day)?.cameras ?? []);
   const lanes = $derived(cameras.map((c) => ({ camera: c.camera, hourly: c.hourly, max: Math.max(1, ...c.hourly) })));
@@ -25,6 +30,7 @@
 
   function load(seconds = parseClock(at)) {
     t = seconds;
+    vstate = Object.fromEntries(cameras.map((c) => [c.camera, 'loading']));
     at = `${String(Math.floor(seconds / 3600)).padStart(2, '0')}:${String(Math.floor((seconds % 3600) / 60)).padStart(2, '0')}`;
     playing = false;
   }
@@ -63,7 +69,9 @@
       <figure>
         {#if t != null}
           <!-- svelte-ignore a11y_media_has_caption -->
-          <video bind:this={videos[c.camera]} src={media.clip(day, c.camera, t, 180)} muted preload="auto"></video>
+          <video bind:this={videos[c.camera]} src={media.clip(day, c.camera, t, CLIP_SECONDS)} muted preload="auto"
+                 onloadeddata={() => (vstate[c.camera] = 'ready')} onerror={() => (vstate[c.camera] = 'error')}></video>
+          <VideoState status={vstate[c.camera] ?? 'loading'} busy={jobState.downloading} />
         {/if}
         <figcaption><span class="tag">{c.camera}</span></figcaption>
       </figure>

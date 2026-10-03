@@ -29,9 +29,9 @@ def _outputs(paths: DayPaths) -> list[dict]:
     seen: dict[str, dict] = {}
     for where, folder in (("local", paths.out), ("share", paths.published)):
         if folder.is_dir():
-            for f in sorted(folder.iterdir()):
+            for f in sorted(folder.iterdir()):  # no per-file stat: each is a round trip on a busy share
                 if f.suffix.lower() in (".mp4", ".jpg"):
-                    seen[f.name] = {"name": f.name, "size": f.stat().st_size, "where": where}
+                    seen[f.name] = {"name": f.name, "where": where}
     return sorted(seen.values(), key=lambda o: o["name"])
 
 

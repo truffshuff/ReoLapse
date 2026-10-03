@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import queue
+import shutil
 import subprocess
+import tempfile
 import threading
 from dataclasses import dataclass
 from datetime import datetime
@@ -77,12 +79,17 @@ def remux(src: Path, dest: Path) -> None:
     """Rewrite Reolink's fragmented MP4 as a regular indexed one (lossless).
 
     Fragmented files have no global index, so every -ss seek scans from the start of
-    the file -- painfully slow over a network share.
+    the file -- painfully slow over a network share. The rewrite happens on local disk
+    (+faststart makes a second full pass to move the index to the front) and the result
+    is copied to `dest` once, so a multi-GB Clear file crosses the network only one time.
     """
-    tmp = dest.with_name(dest.stem + ".remux.mp4")
-    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(src), "-map", "0:v", "-map", "0:a?", "-c", "copy",
-                    "-movflags", "+faststart", str(tmp)], check=True)
-    tmp.replace(dest)
+    with tempfile.TemporaryDirectory(prefix="reolapse-remux-") as d:
+        tmp = Path(d) / dest.name
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(src), "-map", "0:v", "-map", "0:a?", "-c", "copy",
+                        "-movflags", "+faststart", str(tmp)], check=True)
+        part = dest.with_name(dest.name + ".part")
+        shutil.copyfile(tmp, part)
+        part.replace(dest)
 
 
 def _ffmpeg_frames(rec: Recording, args_in: list[str], vf: str) -> Iterator[np.ndarray]:

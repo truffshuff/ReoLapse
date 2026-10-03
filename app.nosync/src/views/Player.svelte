@@ -6,6 +6,8 @@
   import { api, media } from '../lib/api.js';
   import { clock, longDay, parseClock, duration, CAT_LABEL } from '../lib/format.js';
   import RegionOverlay from '../components/RegionOverlay.svelte';
+  import VideoState from '../components/VideoState.svelte';
+  import { jobState } from '../lib/busy.svelte.js';
 
   let { params } = $props();
 
@@ -20,6 +22,8 @@
   let originalAt = $state('12:00');
   let originalT = $state(null);
   let originalSrc = $state('');
+  let synState = $state('loading');
+  let origState = $state('loading');
 
   // Find in area
   let drawing = $state(false);
@@ -81,6 +85,7 @@
   $effect(() => {
     if (!videoName) return;
     length = 0;
+    synState = 'loading';
     fetch(media.out(day, camera, videoName.replace(/\.mp4$/, '.json')))
       .then((r) => (r.ok ? r.json() : null))
       .then((meta) => { if (meta?.length) length = meta.length; })
@@ -110,6 +115,7 @@
     originalT = t;
     originalAt = toInput(t);
     originalSrc = media.clip(day, camera, t, 120);
+    origState = 'loading';
   }
 
   /** Move the synopsis to time of day `t` and load the original footage from the same moment. */
@@ -150,7 +156,9 @@
     {#if videoName}
       <!-- svelte-ignore a11y_media_has_caption -->
       <video bind:this={synVideo} src={media.out(day, camera, videoName)} controls autoplay muted
-             onloadedmetadata={onMeta} ontimeupdate={() => (synTime = synVideo.currentTime)} onseeked={() => (synTime = synVideo.currentTime)}></video>
+             onloadedmetadata={onMeta} ontimeupdate={() => (synTime = synVideo.currentTime)} onseeked={() => (synTime = synVideo.currentTime)}
+             onloadeddata={() => (synState = 'ready')} onerror={() => (synState = 'error')}></video>
+      <VideoState status={synState} busy={jobState.downloading} />
       <RegionOverlay bind:regions {drawing} />
     {:else}
       <div class="empty">No synopsis rendered for this camera and day yet. Run it from <a href="#/jobs">Jobs</a>.</div>
@@ -234,7 +242,10 @@
       </div>
       {#if originalSrc}
         <!-- svelte-ignore a11y_media_has_caption -->
-        <video src={originalSrc} controls autoplay></video>
+        <div class="orig-wrap">
+          <video src={originalSrc} controls autoplay onloadeddata={() => (origState = 'ready')} onerror={() => (origState = 'error')}></video>
+          <VideoState status={origState} busy={jobState.downloading} />
+        </div>
       {/if}
     </section>
   {/if}
@@ -277,4 +288,5 @@
   .axis { display: flex; justify-content: space-between; font-size: 11px; }
   .original { display: flex; flex-direction: column; gap: 12px; }
   .original video { border-radius: 8px; }
+  .orig-wrap { position: relative; min-height: 120px; border-radius: 8px; overflow: hidden; background: #000; }
 </style>
