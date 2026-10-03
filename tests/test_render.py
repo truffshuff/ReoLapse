@@ -55,3 +55,27 @@ def test_job_args_for_type_videos(tmp_path, monkeypatch):
     assert args[args.index("--per-type") + 1] == "person" and "--only" not in args
     args = pipeline_args(Job("render", "2026-10-01", ["Garage"], {"only": ["vehicle", "bogus"]}), cfg)
     assert args[args.index("--only") + 1] == "vehicle" and "--per-type" not in args
+
+
+def test_travel_filter_and_prune(tmp_path):
+    from reolapse import tube_index
+
+    car = [(100, 50, 200, 100)] * 10
+    wobble = [(100 + (i % 3) * 4, 50 + (i % 2) * 3, 200 + (i % 3) * 4, 100) for i in range(20)]  # parked, jittery
+    drive = [(100 + 30 * i, 50, 200 + 30 * i, 100) for i in range(10)]
+    garden = [(300 + 6 * (i % 5), 40, 340 + 6 * (i % 5), 140) for i in range(20)]  # person moving about in place
+    assert not tube_index.really_moved("vehicle", car)
+    assert not tube_index.really_moved("vehicle", wobble)
+    assert tube_index.really_moved("vehicle", drive)
+    assert tube_index.really_moved("person", garden)
+
+    d = tmp_path / "tubes"
+    d.mkdir()
+    metas = []
+    for name, cat, boxes in (("1.0_vehicle", "vehicle", wobble), ("2.0_vehicle", "vehicle", drive)):
+        (d / f"{name}.pkl").write_bytes(b"x")
+        metas.append(tube_index.tube_meta(f"{name}.pkl", 0.0, 4.0, cat, [(i * 0.5, *b) for i, b in enumerate(boxes)]))
+    kept, gone = tube_index.prune(d, metas, (1920, 576))
+    assert [m["id"] for m in kept] == ["2.0_vehicle"] and gone == 1
+    assert (d / "_pruned" / "1.0_vehicle.pkl").exists() and not (d / "1.0_vehicle.pkl").exists()
+    assert [t["id"] for t in tube_index.load(d)["tubes"]] == ["2.0_vehicle"]

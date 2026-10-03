@@ -251,9 +251,12 @@ def _png(img: np.ndarray) -> bytes:
     return cv2.imencode(".png", img, [cv2.IMWRITE_PNG_COMPRESSION, 1])[1].tobytes()
 
 
-def save_tube(paths: DayPaths, seg: list[Det], fps: float, context: list[Det] = ()) -> dict:
-    """Write one tube file; returns its index entry (see tube_index)."""
+def save_tube(paths: DayPaths, seg: list[Det], fps: float, context: list[Det] = ()) -> dict | None:
+    """Write one tube file; returns its index entry (see tube_index), or None if the object never
+    really travelled (a parked car whose detection box wobbled)."""
     cat = Track.category(seg)
+    if not tube_index.really_moved(cat, [d.box for d in seg]):
+        return None
     frames_out = [(d.t, *d.box, _png(d.crop)) for d in seg]
     name, n = f"{seg[0].t:08.1f}_{cat}.pkl", 1
     while (paths.tubes_out / name).exists():  # two objects can start in the same tenth of a second
@@ -389,8 +392,9 @@ def detect_tubes(paths: DayPaths, recs: list[Recording], windows, fps: float, mo
         def finish(seg, owner: Track):
             if seg:
                 meta = save_tube(paths, seg, fps, context_for(seg, owner, tracks.values()))
-                metas.append(meta)
-                stats[meta["category"]] += 1
+                if meta is not None:
+                    metas.append(meta)
+                    stats[meta["category"]] += 1
 
         def expire(t: float):
             for tid in [k for k, tr in tracks.items() if t - tr.last_t > LOST_AFTER]:
@@ -453,7 +457,11 @@ def detect_tubes(paths: DayPaths, recs: list[Recording], windows, fps: float, mo
     print()
     if backgrounds is not None:
         backgrounds.finish()
-    tube_index.write(paths.tubes_out, metas, recs[0].size)
+    # objects kept before this check existed (e.g. from a resumed scan) get the same test
+    metas, dropped = tube_index.prune(paths.tubes_out, metas, recs[0].size)
+    if dropped:
+        print(f"   set aside {dropped} detections that never really moved (parked cars and the like)")
+    stats = Counter(m["category"] for m in metas)
     (paths.tubes_out / CHECKPOINT).unlink(missing_ok=True)  # complete: a later run starts fresh
     return stats
 

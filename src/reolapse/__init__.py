@@ -53,6 +53,8 @@ def main() -> None:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     _common(sub.add_parser("probe", help="check NVR access and what a day's events look like"))
+    pr = sub.add_parser("prune", help="set aside objects that never really moved (for days analyzed before this check)")
+    _common(pr)
     sv = sub.add_parser("serve", help="run the local API server for the desktop app")
     sv.add_argument("--host", default="127.0.0.1")
     sv.add_argument("--port", type=int, default=8765)
@@ -77,6 +79,16 @@ def main() -> None:
     if args.cmd == "probe":
         from . import probe
         asyncio.run(probe.run(cameras, day))
+        return
+    if args.cmd == "prune":
+        from .config import DayPaths
+        from .tube_index import prune
+
+        for cam in cameras:
+            paths = DayPaths(cam, day)
+            kept, gone = prune(paths.tubes)
+            print(f"{cam} {day}: kept {len(kept)} objects, set aside {gone} that never really moved"
+                  + (f" (in {paths.tubes / '_pruned'})" if gone else ""))
         return
     if args.cmd in ("fetch", "run"):
         from . import fetch
