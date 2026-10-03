@@ -39,6 +39,8 @@ async function createWindow() {
     backgroundColor: '#0E1014', titleBarStyle: 'hiddenInset', title: 'Reolapse',
     webPreferences: { contextIsolation: true, sandbox: true },
   });
+  // Start from the current build: an older cached UI must never outlive an update.
+  await win.webContents.session.clearCache();
   // Links to other sites open in the browser, not inside the app.
   win.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' }; });
   await win.loadURL(UI);

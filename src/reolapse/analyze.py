@@ -20,7 +20,7 @@ import cv2
 import numpy as np
 
 from . import tube_index
-from .progress import emit
+from .progress import clock, dur, emit
 from .config import CATEGORIES, MODEL_DIR, DayPaths
 from .media import Recording, day_seconds, frames, keyframe_samples, load_recordings, prefetch
 
@@ -75,12 +75,12 @@ def build_backgrounds(paths: DayPaths, recs: list[Recording], workers: int = 4) 
         for i, partial in enumerate(pool.map(sample, recs), 1):
             for slot, samples in partial.items():
                 leftovers.setdefault(slot, []).extend(samples)
-            print(f"\r  backgrounds: {i}/{len(recs)} files", end="", flush=True)
+            print(f"\r   building backgrounds: {i} of {len(recs)} recording files read", end="", flush=True)
             emit("backgrounds", i / len(recs), paths.camera, f"file {i} of {len(recs)}")
     for slot, samples in leftovers.items():
         write(slot, samples)
     written = len(list(out.glob("*.jpg")))
-    print(f"\r  backgrounds: {written} slots          ")
+    print(f"\r   built {written} background images (one per 10 minutes of the day)" + " " * 20)
     return written
 
 
@@ -287,9 +287,10 @@ def detect_tubes(paths: DayPaths, recs: list[Recording], windows, fps: float, mo
         eta = el / cur * (total - cur) if cur else 0
         emit("analyze", cur / total if total else 1.0, paths.camera,
              f"{sum(stats.values())} objects · about {eta / 60:.0f} min left")
-        print(f"\r  window {wi + 1}/{len(windows)}  {cur / 60:6.1f}/{total / 60:.1f} min of footage  "
-              f"yolo {yolo_frames}/{all_frames} frames  tubes {sum(stats.values())}  "
-              f"elapsed {el / 60:4.1f}m eta {eta / 60:4.1f}m   ", end="", flush=True)
+        share = 100 * yolo_frames / max(all_frames, 1)
+        where = f"up to {clock(windows[0][0] + cur)}" if len(windows) == 1 else f"window {wi + 1} of {len(windows)}"
+        print(f"\r   scanned {where} · {sum(stats.values())} objects so far · detector ran on {share:.0f}% of frames"
+              f" · {dur(el)} elapsed, about {dur(eta)} left   ", end="", flush=True)
 
     for wi, (a, b) in enumerate(windows):
         tracks: dict[int, Track] = {}
@@ -371,15 +372,31 @@ def run(cameras: list[str], day, *, fps: float, model: str, imgsz: int, types: s
         hours: tuple[float, float] = (0, 24)) -> None:
     for cam in cameras:
         paths = DayPaths(cam, day)
-        print(f"== {cam} {day}")
+        cam_t0 = time.monotonic()
+        print(f"== {cam}: finding moving objects on {day}")
         recs = load_recordings(paths)
+        w, h = recs[0].size
+        how = (f"Clear stream scaled to {w}×{h} on the hardware decoder" if recs[0].big
+               else f"{w}×{h}")
+        print(f"   footage: {len(recs)} recording files, {how}")
         if skip_bg and not _backgrounds_match(paths, recs):
-            print("  existing backgrounds don't match this footage's frame size (stream changed?); rebuilding")
+            print("   the saved backgrounds don't match this footage's size (stream changed?), so rebuilding them")
             skip_bg = False
-        if not skip_bg:
+        if skip_bg:
+            print("   reusing this day's background images")
+        else:
+            print("   building background images: the empty scene for every 10 minutes, from one frame a minute…")
             build_backgrounds(paths, recs)
         windows = [(max(a, hours[0] * 3600), min(b, hours[1] * 3600)) for a, b in event_windows(paths, types)]
         windows = [(a, b) for a, b in windows if b > a]
-        print(f"  {len(windows)} event windows, {sum(b - a for a, b in windows) / 60:.1f} min of footage to scan")
+        span = sum(b - a for a, b in windows)
+        if "all" in types:
+            print(f"   scanning the whole day at {fps:g} frames/s; the detector ({model}, {imgsz} px) only runs "
+                  "while something in the picture changes")
+        else:
+            print(f"   scanning {len(windows)} NVR event windows ({dur(span)} of footage) at {fps:g} frames/s "
+                  f"with {model}")
         stats = detect_tubes(paths, recs, windows, fps, model, imgsz)
-        print(f"  tubes: {dict(stats)}")
+        found = ", ".join(f"{n} {k}{'s' if n != 1 and k != 'person' else ''}".replace("person", "people" if n != 1 else "person")
+                          for k, n in stats.most_common()) or "nothing that moved"
+        print(f"   {cam} finished in {dur(time.monotonic() - cam_t0)}: {sum(stats.values())} moving objects ({found})")

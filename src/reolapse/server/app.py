@@ -73,6 +73,20 @@ def _recordings(paths: DayPaths) -> list:
     return hit[1]
 
 
+class UIFiles(StaticFiles):
+    """The built UI. index.html must never be cached (it names the current build's files); the
+    content-hashed files under assets/ can be cached forever. Without this, Electron kept showing
+    an old build after an update."""
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        if path.startswith("assets/"):
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        else:
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 _index_cache: dict[tuple[str, str], tuple[float, dict]] = {}
 
 
@@ -225,6 +239,18 @@ def create_app(queue: JobQueue | None = None) -> FastAPI:
             raise HTTPException(404, "no such job")
         return queue.jobs[job_id].summary(with_log=True)
 
+    @app.get("/api/jobs/{job_id}/log")
+    def job_log(job_id: int):
+        """The job's complete log as a downloadable text file."""
+        if job_id not in queue.jobs:
+            raise HTTPException(404, "no such job")
+        job = queue.jobs[job_id]
+        f = queue.log_path(job)
+        if not f.exists():
+            raise HTTPException(404, "no log yet")
+        return FileResponse(f, media_type="text/plain; charset=utf-8",
+                            filename=f"reolapse-job-{job.id}-{job.kind}-{job.day}.log")
+
     @app.post("/api/jobs/{job_id}/cancel")
     def cancel(job_id: int):
         if job_id not in queue.jobs:
@@ -293,6 +319,6 @@ def create_app(queue: JobQueue | None = None) -> FastAPI:
             return {"ok": False, "error": str(e)}
 
     if UI_DIR.is_dir():  # mounted last so /api routes win
-        app.mount("/", StaticFiles(directory=UI_DIR, html=True), name="ui")
+        app.mount("/", UIFiles(directory=UI_DIR, html=True), name="ui")
 
     return app

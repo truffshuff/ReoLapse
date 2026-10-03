@@ -85,11 +85,16 @@ def remux(src: Path, dest: Path) -> None:
     """
     with tempfile.TemporaryDirectory(prefix="reolapse-remux-") as d:
         tmp = Path(d) / dest.name
-        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(src), "-map", "0:v", "-map", "0:a?", "-c", "copy",
-                        "-movflags", "+faststart", str(tmp)], check=True)
+        remux_local(src, tmp)
         part = dest.with_name(dest.name + ".part")
         shutil.copyfile(tmp, part)
         part.replace(dest)
+
+
+def remux_local(src: Path, out: Path) -> None:
+    """The lossless rewrite itself (fragmented -> indexed, index at the front); `out` should be local."""
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(src), "-map", "0:v", "-map", "0:a?", "-c", "copy",
+                    "-movflags", "+faststart", str(out)], check=True)
 
 
 def _ffmpeg_frames(rec: Recording, args_in: list[str], vf: str) -> Iterator[np.ndarray]:

@@ -12,6 +12,13 @@ from reolapse.server.app import create_app
 from reolapse.server.jobs import Job, JobQueue, pipeline_args
 
 
+@pytest.fixture(autouse=True)
+def _job_state(tmp_path, monkeypatch):
+    # keep the job queue's saved state and logs out of the real Application Support folder
+    import reolapse.server.jobs as jobs_mod
+    monkeypatch.setattr(jobs_mod, "STATE_DIR", tmp_path / "state")
+
+
 @pytest.fixture
 def env(tmp_path, monkeypatch):
     data, work = tmp_path / "share", tmp_path / "work"
@@ -23,13 +30,15 @@ def env(tmp_path, monkeypatch):
 
 
 def fake_command(job: Job) -> list[str]:
-    """Stand-in for the pipeline: two progress lines, one log line, exit code from options."""
+    """Stand-in for the pipeline: progress, in-place status, log lines; exit code from options."""
     code = int(job.options.get("exit", 0))
     script = (
         "import json,sys;"
-        "print('@@'+json.dumps({'stage':'analyze','frac':0.5}));"
-        "print('hello from', sys.argv[1]);"
-        "print('@@'+json.dumps({'stage':'analyze','frac':1.0}));"
+        "sys.stdout.write('\\rdownloading 10 MB');"
+        "print('\\r@@'+json.dumps({'stage':'analyze','frac':0.5}));"
+        "sys.stdout.write('\\rdownloading 20 MB');"
+        "print('\\rhello from', sys.argv[1]);"
+        "print('\\r@@'+json.dumps({'stage':'analyze','frac':1.0}));"
         f"sys.exit({code})"
     )
     return [sys.executable, "-c", script, job.kind]
@@ -66,7 +75,11 @@ def test_job_runs_and_reports_progress(env):
         done = wait_for(client, job["id"])
         assert done["status"] == "done"
         assert done["progress"] == {"stage": "analyze", "frac": 1.0}
-        assert "hello from analyze" in done["log"]
+        log = "\n".join(done["log"])
+        assert "hello from analyze" in log and "Finished in" in log
+        assert "downloading" not in log  # in-place status lines don't fill the log
+        text = client.get(f"/api/jobs/{job['id']}/log").text
+        assert "Queued: Find moving objects" in text and "hello from analyze" in text
 
 
 def test_failed_job_and_validation(env):
@@ -163,3 +176,37 @@ def test_area_query(env):
         r = client.get("/api/days/2026-10-01/Garage/objects/000100.0_person/thumb")
         assert r.status_code == 200 and r.headers["content-type"] == "image/png"
         assert client.get("/api/days/2026-10-01/Garage/objects/..%2Fx/thumb").status_code in (400, 404)
+
+
+def test_queue_survives_restart(env, tmp_path):
+    import asyncio
+
+    import reolapse.server.jobs as jobs_mod
+
+    async def scenario():
+        q1 = JobQueue(fake_command)
+        a = q1.submit("fetch", "2026-09-30", ["Garage"])
+        b = q1.submit("run", "2026-09-29", ["Garage"])
+        a.status = "running"  # pretend the server died mid-job
+        q1._save()
+        q2 = JobQueue(fake_command)
+        q2._restore()
+        assert {j.id: j.status for j in q2.jobs.values()} == {a.id: "queued", b.id: "queued"}
+        assert [q2._pending.get_nowait().id, q2._pending.get_nowait().id] == [a.id, b.id]
+        assert q2.submit("render", "2026-09-28", ["Garage"]).id == b.id + 1
+        assert any("resuming" in line for line in q2.jobs[a.id].log)
+
+    asyncio.run(scenario())
+
+
+def test_ui_cache_headers(env, tmp_path, monkeypatch):
+    import reolapse.server.app as app_mod
+
+    ui = tmp_path / "ui"
+    (ui / "assets").mkdir(parents=True)
+    (ui / "index.html").write_text("<html></html>")
+    (ui / "assets" / "index-abc.js").write_text("x")
+    monkeypatch.setattr(app_mod, "UI_DIR", ui)
+    with TestClient(create_app(JobQueue(fake_command))) as client:
+        assert client.get("/").headers["cache-control"] == "no-cache"
+        assert "immutable" in client.get("/assets/index-abc.js").headers["cache-control"]

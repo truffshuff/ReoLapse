@@ -111,6 +111,7 @@
           {#if j.status === 'running'}
             <div class="bar"><div style:width="{Math.round((j.progress?.frac ?? 0) * 100)}%"></div></div>
             <div class="small muted">{progressText(j.progress) || 'working…'}</div>
+            {#if j.status_line}<div class="small mono status">{j.status_line}</div>{/if}
           {/if}
         </button>
       {/each}
@@ -144,6 +145,10 @@
             {/if}
           </div>
           <pre bind:this={logEl} class="mono">{log.join('\n') || 'No output yet.'}</pre>
+          {#if current.status === 'running' && current.status_line}
+            <div class="live mono" aria-live="polite"><span class="pulse" aria-hidden="true"></span>{current.status_line}</div>
+          {/if}
+          <a class="btn quiet dl" href={`/api/jobs/${current.id}/log`} download>Download full log</a>
         </section>
       {/if}
     </aside>
@@ -164,6 +169,7 @@
   .title { font-weight: 500; }
   .push { margin-left: auto; }
   .small { font-size: 13px; }
+  .status { font-size: 12px; color: var(--accent-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .side { display: flex; flex-direction: column; gap: 16px; }
   .form { display: flex; flex-direction: column; gap: 14px; }
   fieldset { border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 4px; }
@@ -173,6 +179,11 @@
   .lab { display: flex; align-items: center; gap: 2px; }
   .err { color: var(--bad); }
   .logbox { display: flex; flex-direction: column; gap: 10px; }
+  .live { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 8px; background: var(--accent-soft);
+          color: var(--accent-text); font-size: 12px; line-height: 1.4; }
+  .pulse { flex: none; width: 8px; height: 8px; border-radius: 4px; background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: 0.3; } }
+  .dl { align-self: flex-start; }
   pre { margin: 0; max-height: 420px; overflow: auto; padding: 12px 14px; border-radius: 10px; background: var(--inset);
         border: 1px solid var(--line); font-size: 12px; line-height: 1.6; color: #B9C0CB; white-space: pre-wrap; }
 </style>

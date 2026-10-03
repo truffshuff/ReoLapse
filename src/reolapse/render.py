@@ -7,6 +7,7 @@ import json
 import pickle
 import shutil
 import subprocess
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -15,7 +16,7 @@ import numpy as np
 
 from .analyze import BG_SLOT
 from .config import DayPaths
-from .progress import emit
+from .progress import dur, emit
 
 CATEGORY_BGR = {"person": (40, 150, 255), "vehicle": (255, 180, 50), "animal": (80, 220, 80)}
 
@@ -250,7 +251,9 @@ def render_video(paths: DayPaths, tubes: list[Tube], bgs: Backgrounds, *, style:
     nxt = 0
     scale = W / 1920 * 0.55
     day_label = paths.day.strftime("%a %b %-d")
-    print(f"  synopsis: {len(tubes)} tubes -> {total:.0f}s video ({nframes} frames)")
+    style_name = tag.split("_")[0]
+    print(f"   {style_name} video: {len(tubes)} objects in {dur(total)} of video ({nframes} frames)…")
+    t_start = time.monotonic()
     for k in range(nframes):
         tau = k / fps
         while nxt < len(order) and starts[nxt] <= tau:
@@ -280,14 +283,16 @@ def render_video(paths: DayPaths, tubes: list[Tube], bgs: Backgrounds, *, style:
         hud(canvas, day_t, day_label, hist, scale)
         enc.stdin.write(canvas.tobytes())
         if k % 200 == 0:
-            print(f"\r  rendering {k}/{nframes}", end="", flush=True)
+            el = time.monotonic() - t_start
+            left = el / max(k, 1) * (nframes - k)
+            print(f"\r   {style_name} video: frame {k} of {nframes}, about {dur(left)} left   ", end="", flush=True)
             emit("render", k / max(nframes, 1), paths.camera, f"{style} video")
     enc.stdin.close()
     enc.wait()
     # Sidecar for the app: maps time of day <-> video time (day_t = video_t / length * 86400).
     dest.with_suffix(".json").write_text(json.dumps(
         {"length": length, "duration": total, "fps": fps, "speed": speed, "drift_min": drift_min, "tubes": len(tubes)}))
-    print(f"\r  wrote {dest}")
+    print(f"\r   {style_name} video done in {dur(time.monotonic() - t_start)}: {dest.name}" + " " * 30)
     return dest
 
 
@@ -398,11 +403,13 @@ def run(cameras, day, *, styles: list[str], color: str, length: float | None, de
         video: bool = True, drift_min: float = 10.0) -> None:
     for cam in cameras:
         paths = DayPaths(cam, day)
-        print(f"== {cam} {day}")
+        print(f"== {cam}: making the videos and stills for {day}")
         tubes = load_tubes(paths, only)
         if not tubes:
-            print("  no tubes; run `reolapse analyze` first")
+            print("   no moving objects found for this day yet; run the analysis first")
             continue
+        print(f"   {len(tubes)} objects, {len(styles) if video else 0} video style(s)"
+              + (", plus trails, group shot and heatmap stills" if stills else ""))
         bgs = Backgrounds(paths.backgrounds)
         suffix = f"_{'-'.join(sorted(only))}" if only else ""
         for style in styles if video else []:
@@ -412,7 +419,7 @@ def run(cameras, day, *, styles: list[str], color: str, length: float | None, de
         if stills:
             paths.out.mkdir(parents=True, exist_ok=True)
             for fn in (render_trails, render_strobe, render_heatmap):
-                print(f"  wrote {fn(paths, tubes, bgs)}")
+                print(f"   still image: {fn(paths, tubes, bgs).name}")
         publish(paths)
 
 
@@ -421,6 +428,8 @@ def publish(paths: DayPaths) -> None:
     if paths.out.resolve() == paths.published.resolve() or not paths.out.exists():
         return
     paths.published.mkdir(parents=True, exist_ok=True)
-    for f in sorted(paths.out.iterdir()):
+    files = sorted(paths.out.iterdir())
+    print(f"   copying {len(files)} finished files to the share ({paths.published})…")
+    for f in files:
         shutil.copy2(f, paths.published / f.name)
-        print(f"  published {paths.published / f.name}")
+    print("   done")
