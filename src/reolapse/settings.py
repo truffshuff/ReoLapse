@@ -15,7 +15,7 @@ DEFAULTS: dict = {
     "cameras": ["Garage", "Porch Left", "Back Yard Right"],
     "analysis": {"fps": 5.0, "types": "all", "model": "yolo26n-seg.pt", "imgsz": 1280},
     "render": {"styles": ["cutout"], "color": "category", "drift": 10.0, "speed": 2.0, "density": 6.0,
-               "max_tube": 20.0},
+               "max_tube": 20.0, "per_type": []},  # per_type: extra videos of only people/vehicles/animals
     "retention": {"raw_days": 14, "results_days": 90},
     "nightly": {"enabled": False, "time": "02:00"},
     "storage": {"work_root": "", "data_root": ""},  # empty = defaults (REOLAPSE_WORK / REOLAPSE_DATA override)

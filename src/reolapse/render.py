@@ -398,24 +398,46 @@ def render_heatmap(paths: DayPaths, tubes: list[Tube], bgs: Backgrounds) -> Path
     return dest
 
 
+CATEGORY_NAME = {"person": "people", "vehicle": "vehicles", "animal": "animals"}
+
+
 def run(cameras, day, *, styles: list[str], color: str, length: float | None, density: float, speed: float,
         max_tube: float, fps: float, labels: bool, only: set[str] | None, stills: bool,
-        video: bool = True, drift_min: float = 10.0) -> None:
+        video: bool = True, drift_min: float = 10.0, per_type: list[str] = ()) -> None:
+    """Render each camera's videos and stills.
+
+    only:     render just these object types (videos named ..._<types>); the day's stills are left alone,
+              since they describe the whole day.
+    per_type: after the full videos, also render one video per listed type, in the first style
+              (fewer objects, so a shorter, cheaper render).
+    """
     for cam in cameras:
         paths = DayPaths(cam, day)
         print(f"== {cam}: making the videos and stills for {day}")
-        tubes = load_tubes(paths, only)
+        all_tubes = load_tubes(paths, None)
+        tubes = [t for t in all_tubes if not only or t.category in only]
         if not tubes:
-            print("   no moving objects found for this day yet; run the analysis first")
+            print("   no moving objects found for this day yet; run the analysis first" if not all_tubes
+                  else f"   no {', '.join(CATEGORY_NAME.get(o, o) for o in sorted(only))} on this camera this day")
             continue
-        print(f"   {len(tubes)} objects, {len(styles) if video else 0} video style(s)"
-              + (", plus trails, group shot and heatmap stills" if stills else ""))
+        stills = stills and not only
+        extras = [k for k in per_type if not only and video and any(t.category == k for t in all_tubes)]
+        what = f"{len(tubes)} objects" + (f" ({', '.join(CATEGORY_NAME.get(o, o) for o in sorted(only))} only)" if only else "")
+        print(f"   {what}, {len(styles) if video else 0} video style(s)"
+              + (", plus trails, group shot and heatmap stills" if stills else "")
+              + (f", plus {', '.join(CATEGORY_NAME.get(k, k) + '-only' for k in extras)} video(s)" if extras else ""))
         bgs = Backgrounds(paths.backgrounds)
         suffix = f"_{'-'.join(sorted(only))}" if only else ""
         for style in styles if video else []:
             render_video(paths, tubes, bgs, style=style, color=color, length=length, density=density, speed=speed,
                          max_tube=max_tube, fps=fps, labels=labels, tag=f"{style}_{color}{suffix}",
                          drift_min=drift_min)
+        for kind in extras:
+            subset = [t for t in all_tubes if t.category == kind]
+            print(f"   {CATEGORY_NAME.get(kind, kind)} only:")
+            render_video(paths, subset, bgs, style=styles[0], color=color, length=length, density=density,
+                         speed=speed, max_tube=max_tube, fps=fps, labels=labels,
+                         tag=f"{styles[0]}_{color}_{kind}", drift_min=drift_min)
         if stills:
             paths.out.mkdir(parents=True, exist_ok=True)
             for fn in (render_trails, render_strobe, render_heatmap):

@@ -35,7 +35,21 @@
   let searchError = $state('');
 
   const cameras = $derived(days.find((d) => d.day === day)?.cameras ?? []);
-  const videos = $derived((info?.outputs ?? []).filter((o) => o.name.endsWith('.mp4')));
+  // synopsis_<style>_<color>[_<types>].mp4 -> { name, style, color, only }
+  const videos = $derived((info?.outputs ?? []).filter((o) => o.name.endsWith('.mp4')).map((o) => {
+    const [, style, color, only = 'all'] = o.name.replace(/\.mp4$/, '').split('_');
+    return { name: o.name, style, color, only };
+  }));
+  const STYLE_NAMES = ['cutout', 'ghost', 'outline'];
+  const SHOW = [['all', 'Everything'], ['person', 'People'], ['vehicle', 'Vehicles'], ['animal', 'Animals']];
+  const current = $derived(videos.find((v) => v.name === videoName));
+  const has = (style, only) => videos.some((v) => v.style === style && v.only === only);
+  // switch one control and keep the other where possible
+  function choose(style, only) {
+    const pick = videos.find((v) => v.style === style && v.only === only)
+      ?? videos.find((v) => v.only === only) ?? videos.find((v) => v.style === style);
+    if (pick) videoName = pick.name;
+  }
   const dayT = $derived(length ? Math.min(86399, (synTime / length) * 86400) : null);
 
   onMount(async () => {
@@ -96,12 +110,6 @@
 
   function onMeta() {
     if (!length && synVideo?.duration) length = synVideo.duration;
-  }
-
-  function label(name) {
-    // synopsis_cutout_category.mp4 -> "cutout · type"
-    const [, style, color, ...rest] = name.replace('.mp4', '').split('_');
-    return [style, color === 'category' ? 'type' : color, ...rest].filter(Boolean).join(' · ');
   }
 
   function bars(hourly) {
@@ -170,9 +178,19 @@
   </section>
 
   <div class="toolbar">
-    {#if videos.length > 1}
-      <div class="seg" role="group" aria-label="Version">
-        {#each videos as v}<button aria-pressed={v.name === videoName} onclick={() => (videoName = v.name)}>{label(v.name)}</button>{/each}
+    {#if videos.length > 1 && current}
+      <div class="seg" role="group" aria-label="Style">
+        {#each STYLE_NAMES.filter((st) => videos.some((v) => v.style === st)) as st}
+          <button aria-pressed={current.style === st} onclick={() => choose(st, current.only)}
+                  class:missing={!has(st, current.only)}
+                  title={has(st, current.only) ? '' : `No ${st} video of this yet: the closest one is shown`}>{st}</button>
+        {/each}
+      </div>
+      <div class="seg" role="group" aria-label="Show">
+        {#each SHOW.filter(([k]) => k === 'all' || (info?.counts?.[k] ?? 0) > 0) as [k, label]}
+          <button aria-pressed={current.only === k} onclick={() => choose(current.style, k)} class:missing={!videos.some((v) => v.only === k)}
+                  title={videos.some((v) => v.only === k) ? '' : `Not rendered yet: queue a Render job with "Only ${label.toLowerCase()}" in Jobs, or switch it on in Settings → Rendering defaults`}>{label}</button>
+        {/each}
       </div>
     {/if}
     {#if videoName}
@@ -266,6 +284,7 @@
   .small { font-size: 13px; }
   .stage { position: relative; border-radius: 12px; overflow: hidden; background: var(--inset); border: 1px solid var(--line); }
   .toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .seg button.missing { opacity: 0.45; }
   .found { display: flex; flex-direction: column; gap: 12px; }
   .err { color: var(--bad); }
   .results { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));

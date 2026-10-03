@@ -42,6 +42,7 @@ LANE = {"fetch": "download", "analyze": "process", "render": "process", "run": "
 STEP_NAME = {"fetch": "download", "analyze": "object finding", "render": "rendering", "run": "processing"}
 KIND_LABEL = {"run": "Everything (download, analyze, render)", "fetch": "Download", "analyze": "Find moving objects",
               "render": "Render videos and stills"}
+ONLY_NAME = {"person": "people", "vehicle": "vehicles", "animal": "animals"}
 STATE_DIR = settings_mod.SETTINGS_PATH.parent
 HISTORY = 50  # finished jobs kept in the list
 
@@ -102,6 +103,11 @@ def pipeline_args(job: Job, cfg: dict) -> list[str]:
         styles = r["styles"] if isinstance(r["styles"], list) else [r["styles"]]
         args += ["--style", ",".join(styles), "--color", str(r["color"]), "--drift", str(r["drift"]),
                  "--speed", str(r["speed"]), "--density", str(r["density"]), "--max-tube", str(r["max_tube"])]
+        only = [k for k in job.options.get("only", []) if k in ("person", "vehicle", "animal")]
+        if only:  # a one-off render of just these types
+            args += ["--only", ",".join(only)]
+        elif r.get("per_type"):
+            args += ["--per-type", ",".join(r["per_type"])]
     return args
 
 
@@ -284,7 +290,9 @@ class JobQueue:
                 job.group = created[0].id if created else job.id
             self.jobs[job.id] = job
             when = date.fromisoformat(day).strftime("%a %b %-d")
-            self._write_log(job, f"Queued: {KIND_LABEL[k]} for {when}; cameras: {', '.join(job.cameras)}")
+            only = ", ".join(ONLY_NAME.get(o, o) for o in job.options.get("only", []))
+            self._write_log(job, f"Queued: {KIND_LABEL[k]}{f' ({only} only)' if only else ''} for {when}; "
+                                 f"cameras: {', '.join(job.cameras)}")
             created.append(job)
         self._save()
         self._schedule()

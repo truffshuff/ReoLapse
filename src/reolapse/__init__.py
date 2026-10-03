@@ -38,7 +38,9 @@ def _render_opts(sp):
     sp.add_argument("--speed", type=float, default=2.0, help="object playback speed vs real time")
     sp.add_argument("--max-tube", type=float, default=20.0, help="longest any object stays on screen (s)")
     sp.add_argument("--out-fps", type=float, default=20.0)
-    sp.add_argument("--only", help="comma list of person,vehicle,animal")
+    sp.add_argument("--only", help="render only these types (comma list of person,vehicle,animal)")
+    sp.add_argument("--per-type", default="",
+                    help="also render a video of only each of these types, in the first style (comma list)")
     sp.add_argument("--no-labels", action="store_true")
     sp.add_argument("--no-stills", action="store_true")
     sp.add_argument("--no-video", action="store_true", help="stills only")
@@ -89,4 +91,5 @@ def main() -> None:
         render.run(cameras, day, styles=args.style.split(","), color=args.color, length=args.length,
                    density=args.density, speed=args.speed, max_tube=args.max_tube, fps=args.out_fps,
                    labels=not args.no_labels, only=set(args.only.split(",")) if args.only else None,
+                   per_type=[k for k in args.per_type.split(",") if k],
                    stills=not args.no_stills, video=not args.no_video, drift_min=args.drift)

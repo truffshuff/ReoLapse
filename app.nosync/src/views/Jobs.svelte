@@ -26,6 +26,7 @@
   let now = $state(Date.now() / 1000);
 
   let kind = $state('run');
+  let only = $state('');
   let day = $state(yesterday());
   let cameras = $state([]);
   let chosen = $state({});
@@ -75,7 +76,7 @@
     const cams = cameras.filter((c) => chosen[c]);
     if (!cams.length) { error = 'Pick at least one camera.'; return; }
     try {
-      const job = await api.submit(kind, day, cams);
+      const job = await api.submit(kind, day, cams, kind === 'render' && only ? { only: [only] } : {});
       select(job.id);
       if (kind === 'run') error = '';
     } catch (err) {
@@ -188,6 +189,17 @@
             <InfoTip text="Everything queues three jobs for the day: download from the NVR, find moving objects, and render the videos and stills. They run in that order, but a download can run alongside another day's processing. Pick a single step to redo just that part, for example re-render after changing styles in Settings." /></div>
           <select id="kind" bind:value={kind}>{#each KINDS as k}<option value={k.id}>{k.label}</option>{/each}</select>
         </div>
+        {#if kind === 'render'}
+          <div class="field">
+            <div class="lab"><span class="lbl">Only</span>
+              <InfoTip text="Render a video of just one kind of object for this day, alongside the full one; it shows up in the Player under Show. The day's stills are left as they are." /></div>
+            <div class="seg" role="group" aria-label="Only">
+              {#each [['', 'Everything'], ['person', 'People'], ['vehicle', 'Vehicles'], ['animal', 'Animals']] as [k, label]}
+                <button type="button" aria-pressed={only === k} onclick={() => (only = k)}>{label}</button>
+              {/each}
+            </div>
+          </div>
+        {/if}
         <fieldset>
           <legend class="muted">Cameras</legend>
           {#each cameras as c}
@@ -247,7 +259,7 @@
   fieldset { border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 4px; }
   legend { font-size: 13px; margin-bottom: 4px; }
   .field { display: flex; flex-direction: column; gap: 6px; }
-  .field label { font-size: 13px; color: var(--muted); }
+  .field label, .lbl { font-size: 13px; color: var(--muted); }
   .lab { display: flex; align-items: center; gap: 2px; }
   .err { color: var(--bad); }
   .logbox { display: flex; flex-direction: column; gap: 10px; }

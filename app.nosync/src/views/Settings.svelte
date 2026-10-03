@@ -13,6 +13,12 @@
     { id: 'outline', label: 'Outline', hint: 'Solid, with a colored edge around each object' },
   ];
 
+  const PER_TYPE = [
+    { id: 'person', label: 'People', hint: 'Just the people: no traffic in the way' },
+    { id: 'vehicle', label: 'Vehicles', hint: 'Just the cars, trucks and bikes' },
+    { id: 'animal', label: 'Animals', hint: 'Just the pets and wildlife' },
+  ];
+
   const SIZES = [
     { value: 960, label: '960 · fast', about: 'Fine for nearby objects; may miss people far down the street.' },
     { value: 1280, label: '1280 · recommended', about: 'Good balance for the 1920-wide panoramas (~40 frames/s on this Mac).' },
@@ -34,6 +40,7 @@
     nightly: 'Downloads and processes the previous day for every included camera, starting at this time.',
     cameras: 'Only fixed cameras work for synopsis: the background has to stay still. Tracking (pan/zoom) lenses are flagged.',
     stream: 'Fluent is the camera\'s low-resolution sub stream: small and quick, about 100x real time to process (Garage 1920×576, ~5 GB a day). Clear is the full-resolution main stream: much sharper cutouts, but far bigger and slower: Garage 5120×1552 is ~36 GB and ~45 min of downloading a day, Porch Left 4K is ~89 GB and ~1.7 h, and a whole-day scan takes about 3 hours per camera even on the hardware decoder. Clear frames are scaled to 2560 px wide for processing. A change applies the next time a day is downloaded; that day is then re-analyzed in the new stream.',
+    perType: 'Each switch adds one more video per camera and day, in the first style above, containing only that kind of object. With fewer objects they are shorter, less crowded and quicker to render than the full video. The Player switches between them with Show.',
     work: 'Where backgrounds and object data are written and videos are rendered. These are many small, random reads and writes, so a folder on this Mac is much faster than the network share. Finished videos and stills are still copied to the archive, and days processed before you change this keep working from the share. About 1 GB per camera per day accumulates here.',
     archive: 'Where downloaded recordings, the NVR event lists and the finished videos and stills are kept: usually a folder on your NAS share, mounted on this Mac. Leave empty for the default. When it can\'t be reached, the job queue pauses itself.',
     nvr: 'The address and login of your Reolink NVR. Use a dedicated NVR user (viewing and playback is enough) whose password has no & # % or spaces; the NVR\'s web API breaks on those. The password is stored in the macOS Keychain, not in a file.',
@@ -107,6 +114,12 @@
     const next = { ...s.streams };
     if (stream === 'sub') delete next[name]; else next[name] = stream;
     s.streams = next;
+  }
+
+  function setPerType(kind, on) {
+    const want = new Set(s.render.per_type);
+    on ? want.add(kind) : want.delete(kind);
+    s.render.per_type = PER_TYPE.map((x) => x.id).filter((x) => want.has(x));
   }
 
   function setStyle(style, on) {
@@ -212,6 +225,12 @@
             <Switch label={st.label} hint={st.hint} checked={s.render.styles.includes(st.id)} onchange={(on) => setStyle(st.id, on)} />
           {/each}
         </div>
+        <div class="row"><span class="sub-h">Also make videos of only</span><InfoTip text={HELP.perType} /></div>
+        <div class="switches">
+          {#each PER_TYPE as pt}
+            <Switch label={pt.label} hint={pt.hint} checked={s.render.per_type.includes(pt.id)} onchange={(on) => setPerType(pt.id, on)} />
+          {/each}
+        </div>
         <div class="field">
           <div class="lab"><label for="color">Color tags by</label><InfoTip text={HELP.color} /></div>
           <select id="color" bind:value={s.render.color}><option value="category">Type</option><option value="time">Time of day</option></select>
@@ -295,6 +314,7 @@
   .field label { font-size: 13px; color: var(--muted); }
   .lab { display: flex; align-items: center; gap: 2px; }
   .val { margin-left: auto; font-size: 13px; color: var(--text); }
+  .sub-h { font-size: 13px; color: var(--muted); }
   .desc { margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--muted); }
   .desc strong { color: var(--text); font-weight: 500; }
   input[readonly] { color: var(--muted); }
