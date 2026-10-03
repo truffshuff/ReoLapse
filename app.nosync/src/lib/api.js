@@ -31,6 +31,7 @@ export const api = {
   settings: () => request('GET', '/api/settings'),
   saveSettings: (patch) => request('PUT', '/api/settings', patch),
   nvr: () => request('GET', '/api/nvr'),
+  saveNvr: (login) => request('PUT', '/api/nvr', login),
   models: () => request('GET', '/api/models'),
   testNvr: () => request('POST', '/api/nvr/test'),
   objects: (day, cam, regions, categories = []) =>

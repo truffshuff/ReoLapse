@@ -84,6 +84,15 @@ Tests: `uv run python -m pytest tests`.
 
 ## Desktop app
 
+**Installing:** download the `.dmg` from the repository's
+[Releases](../../releases) (Apple Silicon, macOS 13+). The first launch sets up the Python engine
+(about 1.5 GB) in `~/Library/Application Support/Reolapse`; the NVR login is entered in Settings and
+kept in the macOS Keychain. Releases are built by `.github/workflows/release.yml` when a `v*` tag is
+pushed; locally, `npm run release:mac` in `app.nosync/` (build outside `~/Documents`, e.g.
+`--config.directories.output=/tmp/reolapse-release`, because iCloud attributes break code signing).
+
+**From source:**
+
 The Electron app lives in `app.nosync/` (the `.nosync` suffix keeps `node_modules` and the Electron runtime
 out of iCloud). It starts the API server if one isn't already running and opens the UI, which the server hosts
 from `app.nosync/dist`.

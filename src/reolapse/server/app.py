@@ -38,6 +38,13 @@ from . import library
 from .jobs import JobQueue
 
 
+class NvrLogin(BaseModel):
+    host: str
+    user: str
+    port: int = 80
+    password: str | None = None  # omitted/empty = keep the stored one
+
+
 class JobRequest(BaseModel):
     kind: str
     day: str
@@ -331,7 +338,8 @@ def create_app(queue: JobQueue | None = None) -> FastAPI:
             saved = settings_mod.save(patch)
         except ValueError as e:
             raise HTTPException(400, str(e))
-        config.WORK_ROOT = config._work_root()  # a changed working folder applies without a restart
+        config.DATA_ROOT = config._data_root()  # changed folders apply without a restart
+        config.WORK_ROOT = config._work_root()
         library._cache.clear()
         library._day_list.clear()
         return saved
@@ -346,9 +354,24 @@ def create_app(queue: JobQueue | None = None) -> FastAPI:
 
     @app.get("/api/nvr")
     def nvr_info():
-        # Credentials live in .env; only say who we connect as.
-        return {"host": os.environ.get("REOLINK_HOST"), "user": os.environ.get("REOLINK_USER"),
-                "password_set": bool(os.environ.get("REOLINK_PASSWORD"))}
+        """Who we connect as (never the password); source is ".env" or "app"."""
+        from .. import nvr as nvrmod
+
+        c = nvrmod.credentials()
+        return {"host": c["host"], "user": c["user"], "port": c["port"], "password_set": bool(c["password"]),
+                "source": c["source"]}
+
+    @app.put("/api/nvr")
+    def nvr_save(body: NvrLogin):
+        """Save the NVR address/login; the password goes to the system keychain."""
+        from .. import nvr as nvrmod
+
+        if not body.host.strip() or not body.user.strip():
+            raise HTTPException(400, "address and username are required")
+        if re.search(r"[&#%\s]", body.password or ""):
+            raise HTTPException(400, "the NVR rejects passwords containing & # % or spaces in its web API")
+        nvrmod.save_credentials(body.host, body.user, body.port, body.password or None)
+        return nvr_info()
 
     @app.post("/api/nvr/test")
     async def nvr_test():

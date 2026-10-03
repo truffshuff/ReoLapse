@@ -20,15 +20,47 @@ load_dotenv()
 AI_TRIGGERS = VOD_trigger.PERSON | VOD_trigger.VEHICLE | VOD_trigger.ANIMAL
 
 
+KEYRING_SERVICE = "Reolapse NVR"
+
+
+def credentials() -> dict:
+    """NVR address and login: REOLINK_* environment variables (e.g. a .env in a source checkout)
+    win; otherwise the app's settings, with the password from the system keychain."""
+    if os.environ.get("REOLINK_HOST") and os.environ.get("REOLINK_USER") and os.environ.get("REOLINK_PASSWORD"):
+        return {"host": os.environ["REOLINK_HOST"], "user": os.environ["REOLINK_USER"],
+                "password": os.environ["REOLINK_PASSWORD"], "port": int(os.environ.get("REOLINK_PORT", "80")),
+                "source": ".env"}
+    from .settings import load
+
+    s = load()["nvr"]
+    password = None
+    if s["host"] and s["user"]:
+        try:
+            import keyring
+
+            password = keyring.get_password(KEYRING_SERVICE, f"{s['user']}@{s['host']}")
+        except Exception:
+            password = None
+    return {"host": s["host"], "user": s["user"], "password": password, "port": int(s["port"] or 80), "source": "app"}
+
+
+def save_credentials(host: str, user: str, port: int = 80, password: str | None = None) -> None:
+    """Store the NVR address/login in settings and the password in the system keychain."""
+    from .settings import save
+
+    save({"nvr": {"host": host.strip(), "user": user.strip(), "port": int(port or 80)}})
+    if password:
+        import keyring
+
+        keyring.set_password(KEYRING_SERVICE, f"{user.strip()}@{host.strip()}", password)
+
+
 @asynccontextmanager
 async def connect():
-    host = os.environ.get("REOLINK_HOST")
-    user = os.environ.get("REOLINK_USER")
-    password = os.environ.get("REOLINK_PASSWORD")
-    if not (host and user and password):
-        raise SystemExit("Set REOLINK_HOST, REOLINK_USER and REOLINK_PASSWORD in .env (see .env.example)")
-    port = int(os.environ.get("REOLINK_PORT", "80"))
-    nvr = Host(host, user, password, port=port, use_https=False)
+    c = credentials()
+    if not (c["host"] and c["user"] and c["password"]):
+        raise SystemExit("The NVR address and login aren't set yet: enter them in Settings → NVR connection")
+    nvr = Host(c["host"], c["user"], c["password"], port=c["port"], use_https=False)
     try:
         await nvr.get_host_data()
         yield nvr

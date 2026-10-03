@@ -12,8 +12,28 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Share: raw recordings, the NVR event list, and the finished videos/stills.
-DATA_ROOT = Path(os.environ.get("REOLAPSE_DATA", "/Volumes/Photos/ReoLink"))
+
+
+def _setting(*keys: str) -> str:
+    """A value from the app's settings file ('' if unset or unreadable)."""
+    from .settings import load  # settings.py imports nothing from here
+
+    try:
+        value = load()
+        for k in keys:
+            value = value[k]
+        return value or ""
+    except Exception:
+        return ""
+
+
+def _data_root() -> Path:
+    """Share: raw recordings, the NVR event list, and the finished videos/stills.
+    REOLAPSE_DATA wins, then the storage.data_root setting."""
+    return Path(os.environ.get("REOLAPSE_DATA") or _setting("storage", "data_root") or "/Volumes/Photos/ReoLink").expanduser()
+
+
+DATA_ROOT = _data_root()
 
 
 def _work_root() -> Path:
@@ -24,17 +44,25 @@ def _work_root() -> Path:
     """
     if os.environ.get("REOLAPSE_WORK"):
         return Path(os.environ["REOLAPSE_WORK"]).expanduser()
-    from .settings import load  # settings.py imports nothing from here
-
-    try:
-        configured = load()["storage"]["work_root"]
-    except Exception:
-        configured = ""
+    configured = _setting("storage", "work_root")
     return Path(configured).expanduser() if configured else DATA_ROOT
 
 
+def _model_dir() -> Path:
+    """YOLO weights: REOLAPSE_MODELS (set by the desktop app), else the source checkout's models/,
+    else next to the app's settings. Missing weights download there on first use."""
+    if os.environ.get("REOLAPSE_MODELS"):
+        return Path(os.environ["REOLAPSE_MODELS"]).expanduser()
+    checkout = Path(__file__).resolve().parents[2] / "models"
+    if checkout.is_dir():
+        return checkout
+    from .settings import SETTINGS_PATH
+
+    return SETTINGS_PATH.parent / "models"
+
+
 WORK_ROOT = _work_root()
-MODEL_DIR = Path(__file__).resolve().parents[2] / "models"
+MODEL_DIR = _model_dir()
 
 DEFAULT_CAMERAS = ["Garage", "Porch Left", "Back Yard Right"]
 

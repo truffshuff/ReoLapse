@@ -1,61 +1,176 @@
-// Electron shell: starts the reolapse Python server (unless one is already running) and opens its UI.
+// Electron shell: makes sure the reolapse Python server is running, then opens its UI.
+//
+// Development (npm run app): the server runs from the source checkout with `uv run`.
+// Packaged app: the installer carries the Python source, `uv` and ffmpeg. The first launch
+// (and the first launch after an update) builds the Python environment in the app's data
+// folder with a setup window; after that the server starts straight from it.
 const { app, BrowserWindow, shell, dialog } = require('electron');
 const { spawn } = require('node:child_process');
+const fs = require('node:fs');
 const path = require('node:path');
 
 const PORT = Number(process.env.REOLAPSE_PORT || 8765);
 const API = `http://127.0.0.1:${PORT}`;
-const UI = process.env.REOLAPSE_UI_URL || API; // dev: the Vite server; otherwise the Python server hosts dist/
 const REPO = path.resolve(__dirname, '..', '..');
+const PACKAGED = app.isPackaged;
+const RES = PACKAGED ? process.resourcesPath : null;
+const DATA = app.getPath('userData'); // ~/Library/Application Support/Reolapse
+const ENGINE = path.join(DATA, 'engine'); // the Python environment
+const STAMP = path.join(ENGINE, '.reolapse-version');
+const PY = path.join(ENGINE, 'bin', 'python');
 
 let server = null;
+let mainWindow = null;
+let quitting = false;
 
-async function healthy() {
+async function get(pathname) {
   try {
-    const res = await fetch(`${API}/api/health`, { signal: AbortSignal.timeout(1000) });
-    return res.ok;
+    const res = await fetch(`${API}${pathname}`, { signal: AbortSignal.timeout(1500) });
+    return res.ok ? await res.json() : null;
+  } catch {
+    return null;
+  }
+}
+
+function toolEnv() {
+  const env = { ...process.env };
+  delete env.ELECTRON_RUN_AS_NODE;
+  if (PACKAGED) {
+    env.PATH = `${path.join(RES, 'bin')}:${env.PATH || '/usr/bin:/bin'}`; // bundled ffmpeg/ffprobe/uv
+    env.REOLAPSE_UI_DIR = path.join(RES, 'ui');
+    env.REOLAPSE_MODELS = path.join(DATA, 'models');
+    env.UV_PYTHON_INSTALL_DIR = path.join(DATA, 'python');
+    env.UV_PROJECT_ENVIRONMENT = ENGINE;
+    env.UV_PYTHON_PREFERENCE = 'only-managed'; // our own Python, whatever is installed on the Mac
+  }
+  return env;
+}
+
+// ---------------------------------------------------------------- first-run setup (packaged)
+
+function engineReady() {
+  try {
+    return fs.existsSync(PY) && fs.readFileSync(STAMP, 'utf8').trim() === app.getVersion();
   } catch {
     return false;
   }
 }
 
-async function ensureServer() {
-  if (await healthy()) return; // reuse a server started from the terminal
-  const uv = process.env.REOLAPSE_UV || '/opt/homebrew/bin/uv';
-  server = spawn(uv, ['run', '--no-sync', 'reolapse', 'serve', '--port', String(PORT)], {
-    cwd: REPO, stdio: ['ignore', 'inherit', 'inherit'],
+function setupEngine() {
+  return new Promise((resolve, reject) => {
+    const win = new BrowserWindow({
+      width: 720, height: 460, resizable: false, title: 'Setting up Reolapse', backgroundColor: '#0E1014',
+      webPreferences: { contextIsolation: true, sandbox: true },
+    });
+    win.loadFile(path.join(__dirname, 'setup.html'));
+    const say = (line) => {
+      if (!win.isDestroyed()) win.webContents.executeJavaScript(`window.addLine && addLine(${JSON.stringify(line)})`).catch(() => {});
+    };
+    win.webContents.once('did-finish-load', () => {
+      say(`Building the analysis engine in ${ENGINE}`);
+      const uv = spawn(path.join(RES, 'bin', 'uv'), [
+        'sync', '--frozen', '--no-dev', '--no-editable', '--project', path.join(RES, 'backend'),
+      ], { env: toolEnv() });
+      const onData = (buf) => buf.toString().split(/[\r\n]+/).filter(Boolean).forEach(say);
+      uv.stdout.on('data', onData);
+      uv.stderr.on('data', onData);
+      uv.on('error', (e) => { win.destroy(); reject(e); });
+      uv.on('exit', (code) => {
+        if (code === 0) {
+          fs.writeFileSync(STAMP, app.getVersion());
+          say('Done.');
+          setTimeout(() => { win.destroy(); resolve(); }, 600);
+        } else {
+          say(`Setup failed (exit code ${code}). Check the internet connection and open Reolapse again.`);
+          reject(new Error('Setting up the analysis engine failed; see the setup window for details.'));
+        }
+      });
+    });
   });
-  server.on('exit', (code) => { server = null; if (code) console.error(`reolapse server exited with ${code}`); });
-  for (let i = 0; i < 120; i++) {
-    if (await healthy()) return;
+}
+
+// ---------------------------------------------------------------- server
+
+async function ensureServer() {
+  if (await get('/api/health')) return; // already running (another window, or started from a terminal)
+  if (PACKAGED) {
+    if (!engineReady()) await setupEngine();
+    fs.mkdirSync(path.join(DATA, 'logs'), { recursive: true });
+    const log = fs.openSync(path.join(DATA, 'logs', 'server.log'), 'a');
+    server = spawn(PY, ['-m', 'reolapse', 'serve', '--port', String(PORT)], {
+      cwd: DATA, env: toolEnv(), stdio: ['ignore', log, log],
+    });
+  } else {
+    const uv = process.env.REOLAPSE_UV || '/opt/homebrew/bin/uv';
+    server = spawn(uv, ['run', '--no-sync', 'reolapse', 'serve', '--port', String(PORT)], {
+      cwd: REPO, env: toolEnv(), stdio: ['ignore', 'inherit', 'inherit'],
+    });
+  }
+  server.on('exit', (code) => { server = null; if (code && !quitting) console.error(`reolapse server exited with ${code}`); });
+  for (let i = 0; i < 240; i++) {
+    if (await get('/api/health')) return;
+    if (!server) break;
     await new Promise((r) => setTimeout(r, 500));
   }
-  throw new Error('The reolapse server did not start within 60 seconds.');
+  throw new Error(PACKAGED
+    ? `The Reolapse server didn't start. Details: ${path.join(DATA, 'logs', 'server.log')}`
+    : 'The reolapse server did not start within 2 minutes.');
 }
 
 async function createWindow() {
-  const win = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 1440, height: 900, minWidth: 1100, minHeight: 700,
     backgroundColor: '#0E1014', titleBarStyle: 'hiddenInset', title: 'Reolapse',
     webPreferences: { contextIsolation: true, sandbox: true },
   });
   // Start from the current build: an older cached UI must never outlive an update.
-  await win.webContents.session.clearCache();
+  await mainWindow.webContents.session.clearCache();
   // Links to other sites open in the browser, not inside the app.
-  win.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' }; });
-  await win.loadURL(UI);
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' }; });
+  mainWindow.on('closed', () => { mainWindow = null; });
+  await mainWindow.loadURL(process.env.REOLAPSE_UI_URL || API);
 }
 
-app.whenReady().then(async () => {
-  try {
-    await ensureServer();
-    await createWindow();
-  } catch (e) {
-    dialog.showErrorBox('Reolapse', String(e.message || e));
-    app.quit();
-  }
-  app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
-});
+// ---------------------------------------------------------------- lifecycle
 
-app.on('window-all-closed', () => app.quit());
-app.on('before-quit', () => { if (server) server.kill(); });
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', () => { if (mainWindow) { mainWindow.show(); mainWindow.focus(); } else createWindow(); });
+
+  app.whenReady().then(async () => {
+    try {
+      await ensureServer();
+      await createWindow();
+    } catch (e) {
+      dialog.showErrorBox('Reolapse', String(e.message || e));
+      quitting = true;
+      if (server) server.kill('SIGTERM');
+      app.exit(1);
+    }
+    app.on('activate', () => { if (!mainWindow) createWindow(); });
+  });
+
+  // Closing the window keeps Reolapse (and its jobs) running, like other Mac apps; ⌘Q quits.
+  app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+
+  app.on('before-quit', async (event) => {
+    if (quitting || !server) return; // nothing of ours to stop (or we already asked)
+    event.preventDefault();
+    const jobs = (await get('/api/jobs')) || [];
+    const running = jobs.filter((j) => j.status === 'running').length;
+    if (running) {
+      const { response } = await dialog.showMessageBox({
+        type: 'question', buttons: ['Quit', 'Cancel'], defaultId: 1, cancelId: 1,
+        message: `${running} job${running === 1 ? ' is' : 's are'} running`,
+        detail: 'Quitting stops them; they continue from their last checkpoint the next time you open Reolapse.',
+      });
+      if (response !== 0) return;
+    }
+    quitting = true;
+    server.kill('SIGTERM'); // the server saves the queue and stops its jobs
+    const stopped = new Promise((r) => { if (!server) r(); else server.once('exit', r); });
+    await Promise.race([stopped, new Promise((r) => setTimeout(r, 8000))]);
+    app.exit(0); // (app.quit() from inside before-quit is ignored)
+  });
+}

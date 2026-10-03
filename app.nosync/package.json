@@ -2,19 +2,70 @@
   "name": "reolapse-app",
   "private": true,
   "version": "0.1.0",
-  "description": "Reolapse desktop app",
+  "description": "Daily motion synopsis videos from a Reolink NVR",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "app": "env -u ELECTRON_RUN_AS_NODE electron .",
-    "app:dev": "env -u ELECTRON_RUN_AS_NODE REOLAPSE_UI_URL=http://localhost:5173 electron ."
+    "app:dev": "env -u ELECTRON_RUN_AS_NODE REOLAPSE_UI_URL=http://localhost:5173 electron .",
+    "release:prepare": "bash scripts/prepare-release.sh",
+    "release:mac": "npm run build && bash scripts/prepare-release.sh && electron-builder --mac --arm64 --publish never"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^7.3.1",
     "electron": "^44.5.1",
+    "electron-builder": "^26.15.3",
     "svelte": "^5.57.1",
     "vite": "^8.3.2"
+  },
+  "productName": "Reolapse",
+  "author": "truffshuff",
+  "build": {
+    "appId": "com.truffshuff.reolapse",
+    "productName": "Reolapse",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "electron/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "dist",
+        "to": "ui"
+      },
+      {
+        "from": "build-resources/backend",
+        "to": "backend"
+      },
+      {
+        "from": "build-resources/bin",
+        "to": "bin"
+      }
+    ],
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "category": "public.app-category.video",
+      "icon": "build/icon.png",
+      "identity": "-",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "minimumSystemVersion": "13.0"
+    },
+    "dmg": {
+      "title": "Reolapse ${version}",
+      "artifactName": "Reolapse-${version}-mac-arm64.${ext}"
+    }
   }
 }

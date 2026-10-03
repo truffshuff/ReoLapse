@@ -35,7 +35,8 @@
     cameras: 'Only fixed cameras work for synopsis: the background has to stay still. Tracking (pan/zoom) lenses are flagged.',
     stream: 'Fluent is the camera\'s low-resolution sub stream: small and quick, about 100x real time to process (Garage 1920×576, ~5 GB a day). Clear is the full-resolution main stream: much sharper cutouts, but far bigger and slower: Garage 5120×1552 is ~36 GB and ~45 min of downloading a day, Porch Left 4K is ~89 GB and ~1.7 h, and a whole-day scan takes about 3 hours per camera even on the hardware decoder. Clear frames are scaled to 2560 px wide for processing. A change applies the next time a day is downloaded; that day is then re-analyzed in the new stream.',
     work: 'Where backgrounds and object data are written and videos are rendered. These are many small, random reads and writes, so a folder on this Mac is much faster than the network share. Finished videos and stills are still copied to the archive, and days processed before you change this keep working from the share. About 1 GB per camera per day accumulates here.',
-    nvr: 'The NVR address and login come from the project\'s .env file. Use a dedicated NVR user whose password has no & # % or spaces.',
+    archive: 'Where downloaded recordings, the NVR event lists and the finished videos and stills are kept: usually a folder on your NAS share, mounted on this Mac. Leave empty for the default. When it can\'t be reached, the job queue pauses itself.',
+    nvr: 'The address and login of your Reolink NVR. Use a dedicated NVR user (viewing and playback is enough) whose password has no & # % or spaces; the NVR\'s web API breaks on those. The password is stored in the macOS Keychain, not in a file.',
   };
 
   let s = $state(null);
@@ -46,6 +47,26 @@
   let test = $state(null);
   let testing = $state(false);
   let message = $state('');
+  let login = $state({ host: '', user: '', port: 80, password: '' });
+  let loginSaved = $state('');
+  let loginMsg = $state('');
+  const loginDirty = $derived(JSON.stringify({ ...login, password: '' }) !== loginSaved || login.password !== '');
+
+  function setLoginFrom(n) {
+    login = { host: n.host ?? '', user: n.user ?? '', port: n.port ?? 80, password: '' };
+    loginSaved = JSON.stringify({ ...login });
+  }
+
+  async function saveLogin() {
+    loginMsg = '';
+    try {
+      nvr = await api.saveNvr($state.snapshot(login));
+      setLoginFrom(nvr);
+      loginMsg = 'Saved. The password is kept in the system keychain.';
+    } catch (e) {
+      loginMsg = 'Not saved: ' + e.message;
+    }
+  }
 
   const dirty = $derived(s && saved && JSON.stringify(s) !== JSON.stringify(saved));
   const model = $derived(models.find((m) => m.file === s?.analysis.model));
@@ -53,6 +74,7 @@
 
   onMount(async () => {
     [s, health, nvr, models] = await Promise.all([api.settings(), api.health(), api.nvr(), api.models()]);
+    setLoginFrom(nvr);
     saved = structuredClone($state.snapshot(s));
   });
 
@@ -123,11 +145,20 @@
         {#if test?.ok}<span class="ok small">● Connected · {test.model}</span>{:else if test}<span class="bad small">● {test.error}</span>{/if}
       </div>
       <div class="cols3">
-        <div class="field"><label for="nvr-host">Address</label><input id="nvr-host" type="text" value={nvr?.host ?? ''} readonly /></div>
-        <div class="field"><label for="nvr-user">Username</label><input id="nvr-user" type="text" value={nvr?.user ?? ''} readonly /></div>
-        <div class="field"><label for="nvr-pass">Password</label><input id="nvr-pass" type="text" value={nvr?.password_set ? 'set' : 'not set'} readonly /></div>
+        <div class="field"><label for="nvr-host">Address</label><input id="nvr-host" type="text" bind:value={login.host} placeholder="e.g. 192.168.1.20" autocomplete="off" /></div>
+        <div class="field"><label for="nvr-user">Username</label><input id="nvr-user" type="text" bind:value={login.user} autocomplete="off" /></div>
+        <div class="field"><label for="nvr-pass">Password</label>
+          <input id="nvr-pass" type="password" bind:value={login.password} autocomplete="new-password"
+                 placeholder={nvr?.password_set ? 'saved (type to change)' : 'not set'} /></div>
       </div>
-      <div><button class="btn" onclick={runTest} disabled={testing}>{testing ? 'Testing…' : 'Test connection'}</button></div>
+      <div class="row">
+        <button class="btn" onclick={saveLogin} disabled={!loginDirty}>Save login</button>
+        <button class="btn" onclick={runTest} disabled={testing}>{testing ? 'Testing…' : 'Test connection'}</button>
+        {#if loginMsg}<span class="small muted">{loginMsg}</span>{/if}
+      </div>
+      {#if nvr?.source === '.env'}
+        <p class="desc">Right now the login comes from the project's .env file, which takes priority over what's saved here.</p>
+      {/if}
     </section>
 
     <section class="panel" aria-labelledby="cam-h">
@@ -201,7 +232,11 @@
 
       <section class="panel" aria-labelledby="st-h">
         <h2 id="st-h">Storage</h2>
-        <div class="field"><label for="data-root">Archive (raw footage, finished videos)</label><input id="data-root" type="text" value={health?.data_root ?? ''} readonly /></div>
+        <div class="field">
+          <div class="lab"><label for="data-root">Archive folder (raw footage, finished videos)</label><InfoTip text={HELP.archive} /></div>
+          <input id="data-root" type="text" bind:value={s.storage.data_root} placeholder={health?.data_root ?? ''} />
+          <p class="desc">In use: <span class="mono">{health?.data_root ?? ''}</span>{health && !health.data_root_available ? ' (not reachable right now)' : ''}</p>
+        </div>
         <div class="field">
           <div class="lab"><label for="work-root">Working folder</label><InfoTip text={HELP.work} /></div>
           <div class="inline">
@@ -220,7 +255,7 @@
             <input id="res-days" type="number" min="1" bind:value={s.retention.results_days} />
           </div>
         </div>
-        <p class="desc">The archive is set in .env (REOLAPSE_DATA). Automatic cleanup isn't active yet.</p>
+        <p class="desc">Automatic cleanup isn't active yet.</p>
       </section>
 
       <section class="panel" aria-labelledby="ni-h">

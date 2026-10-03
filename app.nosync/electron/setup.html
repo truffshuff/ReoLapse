@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<title>Setting up Reolapse</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; padding: 28px 32px; background: #0E1014; color: #E9EBEF; font: 14px/1.5 -apple-system, system-ui, sans-serif; }
+  h1 { margin: 0 0 6px; font-size: 20px; font-weight: 600; }
+  p { margin: 0 0 16px; color: #A3AAB6; }
+  .bar { height: 6px; border-radius: 3px; background: #232833; overflow: hidden; margin-bottom: 16px; }
+  .bar div { height: 100%; width: 30%; background: #8EA8FF; border-radius: 3px; animation: slide 1.4s ease-in-out infinite; }
+  @keyframes slide { 0% { margin-left: -30%; } 100% { margin-left: 100%; } }
+  pre { margin: 0; height: 250px; overflow: auto; padding: 12px 14px; border-radius: 10px; background: #0B0D11;
+        border: 1px solid #232833; font: 12px/1.6 ui-monospace, monospace; color: #B9C0CB; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+  <h1>Setting up the analysis engine</h1>
+  <p>The first time Reolapse opens (and after an update) it installs its Python engine: about 1.5 GB,
+     a few minutes on a good connection. This only happens once.</p>
+  <div class="bar" aria-hidden="true"><div></div></div>
+  <pre id="log" role="log" aria-live="polite"></pre>
+  <script>
+    const log = document.getElementById('log');
+    window.addLine = (line) => {
+      log.textContent += line + '\n';
+      log.scrollTop = log.scrollHeight;
+    };
+  </script>
+</body>
+</html>

@@ -323,3 +323,28 @@ def test_auto_pause_when_share_disappears(env):
         await _until(lambda: a.status == "done")
 
     asyncio.run(scenario())
+
+
+def test_nvr_login_saved_to_settings_and_keychain(env, monkeypatch):
+    import keyring
+
+    store = {}
+    monkeypatch.setattr(keyring, "set_password", lambda svc, acct, pw: store.__setitem__((svc, acct), pw))
+    monkeypatch.setattr(keyring, "get_password", lambda svc, acct: store.get((svc, acct)))
+    for k in ("REOLINK_HOST", "REOLINK_USER", "REOLINK_PASSWORD"):
+        monkeypatch.delenv(k, raising=False)
+    with TestClient(create_app(JobQueue(fake_command))) as client:
+        assert client.get("/api/nvr").json()["password_set"] is False
+        r = client.put("/api/nvr", json={"host": "10.0.0.5", "user": "viewer", "password": "s3cret!"})
+        assert r.status_code == 200 and r.json() == {"host": "10.0.0.5", "user": "viewer", "port": 80,
+                                                      "password_set": True, "source": "app"}
+        assert store == {("Reolapse NVR", "viewer@10.0.0.5"): "s3cret!"}
+        assert "s3cret" not in (settings_mod.SETTINGS_PATH.read_text())  # never in the settings file
+        assert client.put("/api/nvr", json={"host": "h", "user": "u", "password": "a&b"}).status_code == 400
+        # keeping the stored password when none is sent
+        assert client.put("/api/nvr", json={"host": "10.0.0.5", "user": "viewer", "port": 81}).json()["password_set"]
+    monkeypatch.setenv("REOLINK_HOST", "envhost")
+    monkeypatch.setenv("REOLINK_USER", "envuser")
+    monkeypatch.setenv("REOLINK_PASSWORD", "envpw")
+    from reolapse import nvr as nvrmod
+    assert nvrmod.credentials()["source"] == ".env"

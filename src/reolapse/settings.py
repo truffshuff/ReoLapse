@@ -18,7 +18,8 @@ DEFAULTS: dict = {
                "max_tube": 20.0},
     "retention": {"raw_days": 14, "results_days": 90},
     "nightly": {"enabled": False, "time": "02:00"},
-    "storage": {"work_root": ""},  # empty = use the share (REOLAPSE_WORK in .env overrides)
+    "storage": {"work_root": "", "data_root": ""},  # empty = defaults (REOLAPSE_WORK / REOLAPSE_DATA override)
+    "nvr": {"host": "", "user": "", "port": 80},  # the password lives in the system keychain, never here
     "streams": {},  # camera name -> "sub" (Fluent, default) or "main" (Clear)
 }
 

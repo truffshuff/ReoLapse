@@ -202,11 +202,16 @@ class JobQueue:
                 self._spawn(self._watch_share())
 
     async def stop(self) -> None:
-        for job in self.jobs.values():
-            if job.proc and job.proc.returncode is None:
-                _terminate(job.proc)
+        """Server shutdown (e.g. the app quits): running jobs stop and stay 'running' in the saved
+        queue, so the next start resumes them from their checkpoints instead of marking them failed."""
         for t in list(self._tasks):
             t.cancel()
+        for job in self.jobs.values():
+            if job.status == "running":
+                self._write_log(job, "Stopped because Reolapse closed; it will continue next time.")
+            if job.proc and job.proc.returncode is None:
+                _terminate(job.proc)
+        self._save()
 
     def _spawn(self, coro) -> None:
         task = asyncio.get_running_loop().create_task(coro)
