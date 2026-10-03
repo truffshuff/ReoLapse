@@ -8,6 +8,7 @@
   import Jobs from './views/Jobs.svelte';
   import Settings from './views/Settings.svelte';
   import { api, onJobEvents } from './lib/api.js';
+  import { jobState } from './lib/busy.svelte.js';
 
   const NAV = [
     { id: 'today', label: 'Today' },
@@ -47,7 +48,8 @@
     {#each NAV as item}
       <a href={'#/' + item.id} class:active={route.view === item.id} aria-current={route.view === item.id ? 'page' : undefined}>
         <Icon name={item.id} />{item.label}
-        {#if item.id === 'jobs' && activeJobs}<span class="count mono">{activeJobs}</span>{/if}
+        {#if item.id === 'jobs' && jobState.paused}<span class="count paused">paused</span>
+        {:else if item.id === 'jobs' && activeJobs}<span class="count mono">{activeJobs}</span>{/if}
       </a>
     {/each}
     <div class="status">
@@ -85,6 +87,7 @@
   nav a:hover { color: var(--text); }
   nav a.active { background: #1E2430; color: var(--text); font-weight: 500; }
   .count { margin-left: auto; font-size: 12px; padding: 2px 8px; border-radius: 10px; background: var(--accent-soft); color: var(--accent-text); }
+  .count.paused { background: #3A3122; color: var(--warn); }
   .status { margin-top: auto; padding: 14px 12px; border-radius: 10px; background: #171B23; border: 1px solid var(--line); font-size: 13px; color: var(--muted); }
   .status .row { display: flex; align-items: center; gap: 8px; }
   main { min-width: 0; }

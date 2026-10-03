@@ -22,6 +22,7 @@ def _job_state(tmp_path, monkeypatch):
 @pytest.fixture
 def env(tmp_path, monkeypatch):
     data, work = tmp_path / "share", tmp_path / "work"
+    data.mkdir()  # the queue pauses itself when the share is missing
     monkeypatch.setattr(config, "DATA_ROOT", data)
     monkeypatch.setattr(config, "WORK_ROOT", work)
     monkeypatch.setattr(settings_mod, "SETTINGS_PATH", tmp_path / "settings.json")
@@ -283,3 +284,42 @@ def test_ui_cache_headers(env, tmp_path, monkeypatch):
     with TestClient(create_app(JobQueue(fake_command))) as client:
         assert client.get("/").headers["cache-control"] == "no-cache"
         assert "immutable" in client.get("/assets/index-abc.js").headers["cache-control"]
+
+
+def test_pause_stops_running_job_and_resume_continues(env):
+    import asyncio
+
+    async def scenario():
+        q = JobQueue(sleepy_command)
+        q.start(watch_share=False)
+        (a,) = q.submit("analyze", "2026-09-30", ["Garage"], {"sleep": 1.0})
+        await _until(lambda: a.status == "running" and a.proc is not None)
+        q.pause("you paused it")
+        await _until(lambda: a.status == "queued")
+        assert "queue paused" in a.waiting and any("Paused" in l for l in a.log)
+        await asyncio.sleep(0.2)
+        assert a.status == "queued"  # nothing starts while paused
+        q.resume()
+        await _until(lambda: a.status == "done")
+
+    asyncio.run(scenario())
+
+
+def test_auto_pause_when_share_disappears(env):
+    import asyncio
+
+    async def scenario():
+        here = {"ok": True}
+        q = JobQueue(sleepy_command)
+        q.share_check = lambda: here["ok"]
+        q.start(watch_share=False)
+        q._spawn(q._watch_share(every=0.05))
+        (a,) = q.submit("fetch", "2026-09-30", ["Garage"], {"sleep": 1.0})
+        await _until(lambda: a.status == "running")
+        here["ok"] = False  # laptop leaves home
+        await _until(lambda: q.paused and q.auto_paused and a.status == "queued")
+        here["ok"] = True  # back on the home network
+        await _until(lambda: not q.paused)
+        await _until(lambda: a.status == "done")
+
+    asyncio.run(scenario())

@@ -24,6 +24,9 @@ export const api = {
   submit: (kind, day, cameras, options = {}) => request('POST', '/api/jobs', { kind, day, cameras, options }),
   cancel: (id) => request('POST', `/api/jobs/${id}/cancel`),
   retry: (id) => request('POST', `/api/jobs/${id}/retry`),
+  queue: () => request('GET', '/api/queue'),
+  pauseQueue: () => request('POST', '/api/queue/pause'),
+  resumeQueue: () => request('POST', '/api/queue/resume'),
   move: (id, delta) => request('POST', `/api/jobs/${id}/move?delta=${delta}`),
   settings: () => request('GET', '/api/settings'),
   saveSettings: (patch) => request('PUT', '/api/settings', patch),
@@ -43,9 +46,10 @@ export const media = {
 };
 
 /** Subscribe to job events. Returns an unsubscribe function. */
-export function onJobEvents({ snapshot, job }) {
+export function onJobEvents({ snapshot, job, queue }) {
   const es = new EventSource('/api/events');
   es.addEventListener('snapshot', (e) => snapshot?.(JSON.parse(e.data)));
   es.addEventListener('job', (e) => job?.(JSON.parse(e.data)));
+  es.addEventListener('queue', (e) => queue?.(JSON.parse(e.data)));
   return () => es.close();
 }

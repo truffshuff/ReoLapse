@@ -15,6 +15,7 @@ from collections import Counter, deque
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -80,8 +81,55 @@ def build_backgrounds(paths: DayPaths, recs: list[Recording], workers: int = 4) 
     for slot, samples in leftovers.items():
         write(slot, samples)
     written = len(list(out.glob("*.jpg")))
+    if recs:
+        mark_backgrounds_complete(out, recs[0].size)
     print(f"\r   built {written} background images (one per 10 minutes of the day)" + " " * 20)
     return written
+
+
+BG_DONE = ".complete"  # marker in the backgrounds folder: all slots built, with the frame size
+
+
+def mark_backgrounds_complete(out: Path, size: tuple[int, int]) -> None:
+    (out / BG_DONE).write_text(json.dumps({"size": list(size)}))
+
+
+def backgrounds_complete(paths: DayPaths, size: tuple[int, int]) -> bool:
+    f = paths.backgrounds / BG_DONE
+    try:
+        return json.loads(f.read_text())["size"] == list(size)
+    except (OSError, ValueError, KeyError):
+        return False
+
+
+class InlineBackgrounds:
+    """Builds the 10-minute background medians from the frames the object scan decodes anyway,
+    so a whole-day scan reads each recording once instead of twice (big win for Clear footage).
+    Slots that already exist (e.g. before a pause) are left alone."""
+
+    def __init__(self, out: Path):
+        self.out = out
+        out.mkdir(parents=True, exist_ok=True)
+        self.pending: dict[int, list[np.ndarray]] = {}
+        self.next_t = -1.0
+
+    def offer(self, t: float, frame: np.ndarray) -> None:
+        if t < self.next_t or not 0 <= t < 86400:
+            return
+        self.next_t = (t // BG_SAMPLE + 1) * BG_SAMPLE
+        slot = int(t // BG_SLOT)
+        if not (self.out / f"{slot:03d}.jpg").exists():
+            self.pending.setdefault(slot, []).append(frame.copy())
+        self._flush(below=slot)
+
+    def _flush(self, below: int) -> None:
+        for slot in sorted(s for s in self.pending if s < below):
+            samples = self.pending.pop(slot)
+            bg = np.median(np.stack(samples), axis=0).astype(np.uint8)
+            cv2.imwrite(str(self.out / f"{slot:03d}.jpg"), bg, [cv2.IMWRITE_JPEG_QUALITY, 94])
+
+    def finish(self) -> None:
+        self._flush(below=10**9)
 
 
 # ---------------------------------------------------------------- windows
@@ -263,20 +311,60 @@ def _tracker():
     return BYTETracker(IterableSimpleNamespace(**YAML.load(check_yaml("bytetrack.yaml"))))
 
 
-def detect_tubes(paths: DayPaths, recs: list[Recording], windows, fps: float, model_name: str, imgsz: int) -> Counter:
+CHECKPOINT = "checkpoint.json"
+CHECKPOINT_EVERY = 120.0  # seconds of footage between checkpoints
+
+
+def _resume_point(paths: DayPaths, key: dict) -> dict | None:
+    """A checkpoint from an interrupted scan with the same settings, else None."""
+    try:
+        ck = json.loads((paths.tubes_out / CHECKPOINT).read_text())
+    except (OSError, ValueError):
+        return None
+    return ck if ck.get("key") == key else None
+
+
+def detect_tubes(paths: DayPaths, recs: list[Recording], windows, fps: float, model_name: str, imgsz: int,
+                 backgrounds: InlineBackgrounds | None = None) -> Counter:
+    """Scan `windows` for moving objects, writing tubes as they finish.
+
+    Resumable: a checkpoint (tubes saved so far, the time scanned up to) is written every
+    CHECKPOINT_EVERY seconds of footage; if the job is stopped (pause, sleep, lost share) the
+    next run with the same settings keeps those tubes and continues from that time. Objects
+    that were still being tracked at that moment are picked up again from there.
+    """
     from ultralytics import YOLO
 
-    if paths.tubes_out.exists():
-        shutil.rmtree(paths.tubes_out)
-    paths.tubes_out.mkdir(parents=True)
+    key = {"windows": [[round(a, 1), round(b, 1)] for a, b in windows], "fps": fps, "model": model_name,
+           "imgsz": imgsz, "size": list(recs[0].size)}
+    resume = _resume_point(paths, key)
+    metas: list[dict] = []
+    if resume:
+        keep_files = {m["id"] + ".pkl" for m in resume["metas"]}
+        for p in paths.tubes_out.glob("*.pkl"):
+            if p.name not in keep_files:  # saved after the checkpoint: it will be found again
+                p.unlink()
+        metas = list(resume["metas"])
+        resumed_at = resume["t"]
+        windows = [(max(a, resumed_at), b) for a, b in windows if b > resumed_at]
+        print(f"   resuming an interrupted scan from {clock(resumed_at)}: {len(metas)} objects already found")
+    else:
+        if paths.tubes_out.exists():
+            shutil.rmtree(paths.tubes_out)
+        paths.tubes_out.mkdir(parents=True)
+
+    def checkpoint(t: float) -> None:
+        tmp = paths.tubes_out / (CHECKPOINT + ".tmp")
+        tmp.write_text(json.dumps({"key": key, "t": t, "metas": metas}, separators=(",", ":")))
+        tmp.replace(paths.tubes_out / CHECKPOINT)
 
     model = YOLO(str(MODEL_DIR / model_name))
     keep = [i for i, n in model.names.items() if n in CATEGORIES]
     gate = MotionGate(fps)
     tracker = _tracker()
-    stats: Counter = Counter()
-    metas: list[dict] = []
+    stats: Counter = Counter(m["category"] for m in metas)
     total = sum(b - a for a, b in windows)
+    last_checkpoint = windows[0][0] if windows else 0.0
     done = 0.0
     yolo_frames = all_frames = 0
     t_start = time.monotonic()
@@ -339,6 +427,11 @@ def detect_tubes(paths: DayPaths, recs: list[Recording], windows, fps: float, mo
 
         for t, frame in prefetch(frames(recs, a, b, fps)):
             all_frames += 1
+            if backgrounds is not None:
+                backgrounds.offer(t, frame)
+            if t - last_checkpoint >= CHECKPOINT_EVERY:
+                checkpoint(t)
+                last_checkpoint = t
             if gate(t, frame):
                 yolo_frames += 1
                 batch.append((t, frame))
@@ -354,9 +447,14 @@ def detect_tubes(paths: DayPaths, recs: list[Recording], windows, fps: float, mo
         for tr in list(tracks.values()):
             finish(tr.close(), tr)
         done += b - a
+        checkpoint(b)
+        last_checkpoint = b
         report(done, wi)
     print()
+    if backgrounds is not None:
+        backgrounds.finish()
     tube_index.write(paths.tubes_out, metas, recs[0].size)
+    (paths.tubes_out / CHECKPOINT).unlink(missing_ok=True)  # complete: a later run starts fresh
     return stats
 
 
@@ -379,11 +477,19 @@ def run(cameras: list[str], day, *, fps: float, model: str, imgsz: int, types: s
         how = (f"Clear stream scaled to {w}×{h} on the hardware decoder" if recs[0].big
                else f"{w}×{h}")
         print(f"   footage: {len(recs)} recording files, {how}")
-        if skip_bg and not _backgrounds_match(paths, recs):
+        size = recs[0].size
+        if paths.backgrounds.is_dir() and not _backgrounds_match(paths, recs) and any(paths.backgrounds.glob("*.jpg")):
             print("   the saved backgrounds don't match this footage's size (stream changed?), so rebuilding them")
+            shutil.rmtree(paths.backgrounds_out, ignore_errors=True)
             skip_bg = False
-        if skip_bg:
+        whole_day = "all" in types and hours == (0, 24)
+        inline = None
+        if backgrounds_complete(paths, size) or (skip_bg and _backgrounds_match(paths, recs)):
             print("   reusing this day's background images")
+        elif whole_day:
+            print("   background images (the empty scene for every 10 minutes) are built during the scan,"
+                  " so each recording is read only once")
+            inline = InlineBackgrounds(paths.backgrounds_out)
         else:
             print("   building background images: the empty scene for every 10 minutes, from one frame a minute…")
             build_backgrounds(paths, recs)
@@ -396,7 +502,9 @@ def run(cameras: list[str], day, *, fps: float, model: str, imgsz: int, types: s
         else:
             print(f"   scanning {len(windows)} NVR event windows ({dur(span)} of footage) at {fps:g} frames/s "
                   f"with {model}")
-        stats = detect_tubes(paths, recs, windows, fps, model, imgsz)
+        stats = detect_tubes(paths, recs, windows, fps, model, imgsz, backgrounds=inline)
+        if inline is not None:
+            mark_backgrounds_complete(paths.backgrounds_out, size)
         found = ", ".join(f"{n} {k}{'s' if n != 1 and k != 'person' else ''}".replace("person", "people" if n != 1 else "person")
                           for k, n in stats.most_common()) or "nothing that moved"
         print(f"   {cam} finished in {dur(time.monotonic() - cam_t0)}: {sum(stats.values())} moving objects ({found})")

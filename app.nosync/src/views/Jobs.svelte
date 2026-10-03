@@ -4,6 +4,7 @@
   import { yesterday, duration } from '../lib/format.js';
   import Switch from '../components/Switch.svelte';
   import InfoTip from '../components/InfoTip.svelte';
+  import { jobState } from '../lib/busy.svelte.js';
 
   const KINDS = [
     { id: 'run', label: 'Everything (download → find objects → render)' },
@@ -99,7 +100,22 @@
       <h1>Jobs</h1>
       <div class="muted sub">Two lanes run side by side: downloading, and processing (finding objects, rendering). A day's steps always run in order.</div>
     </div>
+    <div class="push row">
+      <InfoTip text="Pause stops the running jobs right away and starts nothing new until you resume. Each job continues from its last checkpoint: downloads keep every finished file and object finding keeps everything found so far (it saves every two minutes of footage). The queue also pauses itself when the network share can't be reached, for example when the laptop leaves home, and resumes when it's back." />
+      {#if jobState.paused}
+        <button class="btn primary" onclick={() => api.resumeQueue()}>Resume queue</button>
+      {:else}
+        <button class="btn" onclick={() => api.pauseQueue()}>Pause queue</button>
+      {/if}
+    </div>
   </header>
+
+  {#if jobState.paused}
+    <div class="banner" role="status">
+      <strong>Queue paused</strong>: {jobState.reason}.
+      {#if jobState.auto}It will resume by itself when the share is reachable again.{:else}Nothing runs until you resume.{/if}
+    </div>
+  {/if}
 
   <div class="grid">
     <section aria-label="Jobs" class="jobs">
@@ -204,6 +220,8 @@
 <style>
   .page { padding: 24px 32px 32px; display: flex; flex-direction: column; gap: 22px; }
   h1 { font-size: 22px; font-weight: 600; }
+  header { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  .banner { padding: 12px 16px; border-radius: 10px; background: #2E2A1F; border: 1px solid #4A3F28; color: #F3DDB8; font-size: 14px; }
   h2 { font-size: 15px; font-weight: 600; }
   .sub { font-size: 13px; }
   .grid { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 20px; align-items: start; }

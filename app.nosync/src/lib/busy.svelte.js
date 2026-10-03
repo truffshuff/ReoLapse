@@ -1,7 +1,7 @@
 // Shared, app-wide: is a job currently downloading? (Footage then loads slowly from the share.)
 import { onJobEvents } from './api.js';
 
-export const jobState = $state({ downloading: false, running: false });
+export const jobState = $state({ downloading: false, running: false, paused: false, reason: '', auto: false });
 
 const jobs = new Map();
 function recompute() {
@@ -13,4 +13,5 @@ function recompute() {
 onJobEvents({
   snapshot: (list) => { jobs.clear(); list.forEach((j) => jobs.set(j.id, j)); recompute(); },
   job: (e) => { jobs.set(e.job.id, e.job); recompute(); },
+  queue: (q) => { jobState.paused = q.paused; jobState.reason = q.reason; jobState.auto = q.auto; },
 });

@@ -242,6 +242,20 @@ def create_app(queue: JobQueue | None = None) -> FastAPI:
             raise HTTPException(404, "no such job")
         return queue.jobs[job_id]
 
+    @app.get("/api/queue")
+    def queue_state():
+        return queue.queue_state()
+
+    @app.post("/api/queue/pause")
+    async def pause_queue():
+        queue.pause("you paused it")
+        return queue.queue_state()
+
+    @app.post("/api/queue/resume")
+    async def resume_queue():
+        queue.resume()
+        return queue.queue_state()
+
     @app.post("/api/jobs/{job_id}/retry")
     async def retry(job_id: int):
         _job(job_id)
@@ -291,10 +305,14 @@ def create_app(queue: JobQueue | None = None) -> FastAPI:
         async def stream():
             try:
                 yield f"event: snapshot\ndata: {json.dumps([j.summary() for j in queue.jobs.values()])}\n\n"
+                yield f"event: queue\ndata: {json.dumps(queue.queue_state())}\n\n"
                 while True:
                     try:
                         event = await asyncio.wait_for(q.get(), timeout=15)
-                        yield f"event: job\ndata: {json.dumps(event)}\n\n"
+                        if "queue" in event:
+                            yield f"event: queue\ndata: {json.dumps(event['queue'])}\n\n"
+                        else:
+                            yield f"event: job\ndata: {json.dumps(event)}\n\n"
                     except asyncio.TimeoutError:
                         yield ": keep-alive\n\n"
             finally:

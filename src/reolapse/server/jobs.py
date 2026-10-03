@@ -23,6 +23,7 @@ import asyncio
 import json
 import os
 import re
+import signal
 import sys
 import time
 from collections import deque
@@ -31,6 +32,7 @@ from datetime import date
 from pathlib import Path
 from typing import Callable
 
+from .. import config
 from .. import settings as settings_mod
 
 KINDS = ("fetch", "analyze", "render", "run")
@@ -68,6 +70,7 @@ class Job:
     waiting: str = ""  # why a queued job can't start yet
     log: deque = field(default_factory=lambda: deque(maxlen=400))
     proc: asyncio.subprocess.Process | None = field(default=None, repr=False)
+    interrupted: bool = field(default=False, repr=False)  # stopped by a pause: goes back to the queue
 
     FIELDS = ("id", "kind", "day", "cameras", "options", "status", "created", "started", "finished",
               "returncode", "progress", "status_line", "order", "group", "waiting")
@@ -117,6 +120,17 @@ async def _keep_awake_while(pid: int) -> None:
         pass
 
 
+def _terminate(proc: asyncio.subprocess.Process) -> None:
+    """SIGTERM the job's whole process group (the job and its ffmpeg children)."""
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError):
+        try:
+            proc.terminate()
+        except ProcessLookupError:
+            pass
+
+
 class JobQueue:
     def __init__(self, command_for: Callable[[Job], list[str]] = default_command, state_dir: Path | None = None):
         self.command_for = command_for
@@ -126,6 +140,10 @@ class JobQueue:
         self._tasks: set[asyncio.Task] = set()
         self._started = False
         self._next_id = 1
+        self.paused = False
+        self.pause_reason = ""
+        self.auto_paused = False  # paused because the share went away; resumes when it's back
+        self.share_check: Callable[[], bool] = lambda: config.DATA_ROOT.is_dir()
 
     # -- persistence
     @property
@@ -139,7 +157,8 @@ class JobQueue:
         keep = sorted(self.jobs.values(), key=lambda j: j.id)
         finished = [j for j in keep if j.status not in ("queued", "running")]
         drop = {j.id for j in finished[:-HISTORY]} if len(finished) > HISTORY else set()
-        data = [j.summary() for j in keep if j.id not in drop]
+        data = {"paused": self.paused, "reason": self.pause_reason, "auto": self.auto_paused,
+                "jobs": [j.summary() for j in keep if j.id not in drop]}
         try:
             self.state_dir.mkdir(parents=True, exist_ok=True)
             tmp = self._state_file.with_suffix(".tmp")
@@ -153,6 +172,9 @@ class JobQueue:
             saved = json.loads(self._state_file.read_text())
         except (OSError, ValueError):
             return
+        if isinstance(saved, dict):
+            self.paused, self.pause_reason, self.auto_paused = saved["paused"], saved["reason"], saved["auto"]
+            saved = saved["jobs"]
         for d in saved:
             job = Job(**{k: d[k] for k in Job.FIELDS if k in d})
             job.order = job.order or float(job.id)
@@ -171,18 +193,74 @@ class JobQueue:
             pass
 
     # -- lifecycle
-    def start(self) -> None:
+    def start(self, watch_share: bool = True) -> None:
         if not self._started:
             self._started = True
             self._restore()
             self._schedule()
+            if watch_share:
+                self._spawn(self._watch_share())
 
     async def stop(self) -> None:
         for job in self.jobs.values():
             if job.proc and job.proc.returncode is None:
-                job.proc.terminate()
+                _terminate(job.proc)
         for t in list(self._tasks):
             t.cancel()
+
+    def _spawn(self, coro) -> None:
+        task = asyncio.get_running_loop().create_task(coro)
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def _share_ok(self) -> bool:
+        """Is the archive share reachable? (A dead SMB mount can hang a stat, so time-limit it.)"""
+        try:
+            return await asyncio.wait_for(asyncio.to_thread(self.share_check), timeout=10)
+        except (asyncio.TimeoutError, OSError):
+            return False
+
+    async def _watch_share(self, every: float = 15.0) -> None:
+        """Pause the queue when the share disappears (laptop away from home); resume when it's back."""
+        while True:
+            ok = await self._share_ok()
+            if not ok and not self.paused:
+                self.pause("the network share isn't reachable", auto=True)
+            elif ok and self.paused and self.auto_paused:
+                self.resume()
+            await asyncio.sleep(every)
+
+    # -- pause / resume
+    def queue_state(self) -> dict:
+        return {"paused": self.paused, "reason": self.pause_reason, "auto": self.auto_paused}
+
+    def pause(self, reason: str = "paused", auto: bool = False) -> None:
+        """Stop starting jobs, and stop running ones now; they go back to the front of the queue and
+        continue from their last checkpoint on resume (downloads keep finished files, analysis keeps
+        the objects found so far)."""
+        self.paused, self.pause_reason, self.auto_paused = True, reason, auto
+        for job in self.jobs.values():
+            if job.status == "running" and not job.interrupted:
+                job.interrupted = True  # also covers a job whose process is only just starting
+                self._write_log(job, f"Paused ({reason}); it will continue from its last checkpoint.")
+                if job.proc and job.proc.returncode is None:
+                    _terminate(job.proc)
+        self._save()
+        self._publish_queue()
+        self._schedule()
+
+    def resume(self) -> None:
+        self.paused, self.pause_reason, self.auto_paused = False, "", False
+        self._save()
+        self._publish_queue()
+        self._schedule()
+
+    def _publish_queue(self) -> None:
+        for q in list(self._listeners):
+            try:
+                q.put_nowait({"queue": self.queue_state()})
+            except asyncio.QueueFull:
+                pass
 
     # -- API (call from the event loop: the HTTP handlers are async)
     def submit(self, kind: str, day: str, cameras: list[str], options: dict | None = None) -> list[Job]:
@@ -217,7 +295,7 @@ class JobQueue:
             self._schedule()
         elif job.status == "running" and job.proc:
             job.status = "cancelled"
-            job.proc.terminate()
+            _terminate(job.proc)
         return job
 
     def retry(self, job_id: int) -> Job:
@@ -275,6 +353,12 @@ class JobQueue:
         queued = sorted((j for j in self.jobs.values() if j.status == "queued"), key=lambda j: j.order)
         to_start = []
         for job in queued:
+            if self.paused:
+                reason = f"queue paused: {self.pause_reason}"
+                if reason != job.waiting:
+                    job.waiting = reason
+                    self._publish(job)
+                continue
             reason = self._blocker(job)
             if not reason and job.lane in running_lanes:
                 reason = f"next in the {job.lane} lane" if job.lane not in {j.lane for j in to_start} else ""
@@ -288,9 +372,7 @@ class JobQueue:
         for job in to_start:
             job.waiting = ""
             job.status = "running"  # claim the lane now; _run fills in the rest
-            task = asyncio.get_running_loop().create_task(self._run(job))
-            self._tasks.add(task)
-            task.add_done_callback(self._tasks.discard)
+            self._spawn(self._run(job))
 
     # -- internals
     def _publish(self, job: Job, line: str | None = None) -> None:
@@ -322,7 +404,10 @@ class JobQueue:
         env = {**os.environ, "REOLAPSE_PROGRESS": "json", "PYTHONUNBUFFERED": "1"}
         try:
             job.proc = await asyncio.create_subprocess_exec(
-                *self.command_for(job), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, env=env)
+                *self.command_for(job), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, env=env,
+                start_new_session=True)  # own process group: stopping it also stops its ffmpeg helpers
+            if job.interrupted or job.status == "cancelled":  # paused/cancelled while it was starting
+                _terminate(job.proc)
             await _keep_awake_while(job.proc.pid)
             buf = ""
             while chunk := await job.proc.stdout.read(4096):
@@ -337,8 +422,18 @@ class JobQueue:
         except Exception as e:  # spawn failure etc.
             self._write_log(job, f"Could not run the job: {e}")
             job.returncode = -1
-        job.finished = time.time()
         job.status_line = ""
+        if job.returncode != 0 and not job.interrupted and job.status != "cancelled" and not await self._share_ok():
+            job.interrupted = True  # failed because the share went away: pause rather than fail
+            self.pause("the network share isn't reachable", auto=True)
+        if job.interrupted:
+            job.interrupted, job.status, job.proc, job.progress = False, "queued", None, {}
+            job.order = min((j.order for j in self.jobs.values()), default=0.0) - 1  # first when resumed
+            self._save()
+            self._publish(job)
+            self._schedule()
+            return
+        job.finished = time.time()
         took = _dur(job.finished - job.started)
         if job.status == "cancelled":
             self._write_log(job, f"Cancelled after {took}.")
