@@ -346,6 +346,28 @@ def _resume_point(paths: DayPaths, key: dict) -> dict | None:
     return ck if ck.get("key") == key else None
 
 
+def _no_nms_time_limit() -> None:
+    """Turn off Ultralytics' NMS time limit (2 s + 0.05 s per image).
+
+    On MPS the model runs asynchronously, so the NMS timer also counts the wait for the forward
+    pass; with a large model at 1920 px a batch of 8 takes about as long as the limit. When it trips,
+    NMS stops and every later image in the batch comes back with no detections at all ("NMS time
+    limit 2.400s exceeded"), a hole of up to 0.7 s in every track at 10 fps.
+    """
+    from ultralytics.utils import nms
+
+    if getattr(nms.non_max_suppression, "_no_time_limit", False):
+        return
+    original = nms.non_max_suppression
+
+    def non_max_suppression(*args, **kwargs):
+        kwargs["max_time_img"] = 1e6
+        return original(*args, **kwargs)
+
+    non_max_suppression._no_time_limit = True
+    nms.non_max_suppression = non_max_suppression
+
+
 def detect_tubes(paths: DayPaths, recs: list[Recording], windows, fps: float, model_name: str, imgsz: int,
                  backgrounds: InlineBackgrounds | None = None) -> Counter:
     """Scan `windows` for moving objects, writing tubes as they finish.
@@ -380,6 +402,7 @@ def detect_tubes(paths: DayPaths, recs: list[Recording], windows, fps: float, mo
         tmp.write_text(json.dumps({"key": key, "t": t, "metas": metas}, separators=(",", ":")))
         tmp.replace(paths.tubes_out / CHECKPOINT)
 
+    _no_nms_time_limit()
     model = YOLO(str(MODEL_DIR / model_name))
     keep = [i for i, n in model.names.items() if n in CATEGORIES]
     gate = MotionGate(fps)
