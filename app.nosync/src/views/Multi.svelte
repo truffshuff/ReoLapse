@@ -3,7 +3,7 @@
   import { onMount } from 'svelte';
   import Icon from '../components/Icon.svelte';
   import { api, media } from '../lib/api.js';
-  import { clock, longDay, parseClock, duration, CAT_LABEL } from '../lib/format.js';
+  import { clock, longDay, parseClock, duration, CAT_LABEL, STREAM_NAME } from '../lib/format.js';
   import VideoState from '../components/VideoState.svelte';
   import { jobState } from '../lib/busy.svelte.js';
 
@@ -123,7 +123,7 @@
                  onloadeddata={() => (vstate[c.camera] = 'ready')} onerror={() => (vstate[c.camera] = 'error')}></video>
           <VideoState status={vstate[c.camera] ?? 'loading'} busy={jobState.downloading} />
         {/if}
-        <figcaption><span class="tag">{c.camera}</span></figcaption>
+        <figcaption><span class="tag">{c.camera}{c.footage?.stream ? ` · ${STREAM_NAME[c.footage.stream]}` : ''}</span></figcaption>
       </figure>
     {/each}
   </section>

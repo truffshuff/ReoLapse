@@ -45,3 +45,31 @@ export const STATUS = {
   fetched: { label: 'Downloaded', cls: '' },
   empty: { label: 'No data', cls: '' },
 };
+
+export const STREAM_NAME = { main: 'Clear', sub: 'Fluent', mixed: 'Clear + Fluent' };
+
+const MODEL_NAME = {
+  'yolo26n-seg.pt': 'YOLO26 nano', 'yolo26s-seg.pt': 'YOLO26 small', 'yolo26m-seg.pt': 'YOLO26 medium',
+  'yolo26l-seg.pt': 'YOLO26 large', 'yolo26x-seg.pt': 'YOLO26 extra large', 'yolo11n-seg.pt': 'YOLO11 nano',
+};
+export const modelName = (file) => MODEL_NAME[file] ?? file?.replace(/\.pt$/, '') ?? '';
+
+/** "Clear 5120×1552 → 2560×776" for the footage an analysis read. */
+export function analyzedFrom(a) {
+  if (!a) return '';
+  const [sw, sh] = a.source_size ?? [], [w, h] = a.size ?? [];
+  const src = sw ? `${sw}×${sh}` : '';
+  return `${STREAM_NAME[a.stream] ?? 'footage'} ${src}${w && w !== sw ? ` → ${w}×${h}` : ''}`.trim();
+}
+
+/** "YOLO26 large · 1920 px · 10 fps · whole day" */
+export function analyzedWith(a) {
+  if (!a) return '';
+  const where = a.types?.includes('all') ? 'whole day' : 'NVR events only';
+  return [modelName(a.model), a.imgsz && `${a.imgsz} px`, a.fps && `${a.fps} fps`, where].filter(Boolean).join(' · ');
+}
+
+export function when(iso) {
+  if (!iso) return '';
+  return new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}

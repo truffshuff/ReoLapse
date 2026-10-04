@@ -290,8 +290,15 @@ def render_video(paths: DayPaths, tubes: list[Tube], bgs: Backgrounds, *, style:
     enc.stdin.close()
     enc.wait()
     # Sidecar for the app: maps time of day <-> video time (day_t = video_t / length * 86400).
+    try:  # how the objects were found (recorded since v0.1.12)
+        analysis = json.loads((paths.tubes / "analysis.json").read_text())
+    except (OSError, ValueError):
+        analysis = None
     dest.with_suffix(".json").write_text(json.dumps(
-        {"length": length, "duration": total, "fps": fps, "speed": speed, "drift_min": drift_min, "tubes": len(tubes)}))
+        {"length": length, "duration": total, "fps": fps, "speed": speed, "drift_min": drift_min, "tubes": len(tubes),
+         "style": style, "color": color, "density": density, "max_tube": max_tube, "labels": labels,
+         "categories": sorted({t.category for t in tubes}),
+         "rendered": time.strftime("%Y-%m-%dT%H:%M:%S"), "analysis": analysis}))
     print(f"\r   {style_name} video done in {dur(time.monotonic() - t_start)}: {dest.name}" + " " * 30)
     return dest
 

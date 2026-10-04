@@ -92,3 +92,21 @@ def test_travel_filter_and_prune(tmp_path):
     assert [m["id"] for m in kept] == ["2.0_vehicle"] and gone == 1
     assert (d / "_pruned" / "1.0_vehicle.pkl").exists() and not (d / "1.0_vehicle.pkl").exists()
     assert [t["id"] for t in tube_index.load(d)["tubes"]] == ["2.0_vehicle"]
+
+
+def test_settings_are_recorded_for_the_app(tmp_path, monkeypatch):
+    import json
+    from reolapse.analyze import write_analysis_info
+    from reolapse.config import stream_of
+    from reolapse.media import Recording
+
+    assert stream_of(["main_1.mp4", "main_2.mp4"]) == "main" and stream_of(["sub_1.mp4", "main_2.mp4"]) == "mixed"
+    assert stream_of([]) is None
+    paths = _day(tmp_path, monkeypatch)
+    rec = Recording(paths.raw / "main_20261001_000000.mp4", 0, 3600, 5120, 1552)
+    write_analysis_info(paths, [rec], fps=10.0, model="yolo26l-seg.pt", imgsz=1920, types={"all"}, hours=(0, 24))
+    info = json.loads((paths.tubes_out / "analysis.json").read_text())
+    assert info["stream"] == "main" and info["size"] == [2560, 776] and info["model"] == "yolo26l-seg.pt"
+    _render(stills=False)
+    side = json.loads((paths.published / "synopsis_cutout_category.json").read_text())
+    assert side["style"] == "cutout" and side["analysis"]["imgsz"] == 1920 and side["categories"] == ["person", "vehicle"]

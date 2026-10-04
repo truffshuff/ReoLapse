@@ -10,7 +10,7 @@ from datetime import date
 from pathlib import Path
 
 from .. import config
-from ..config import DayPaths, slug
+from ..config import DayPaths, slug, stream_of
 
 DAY_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 _cache: dict[tuple[str, str], tuple[float, dict]] = {}
@@ -34,6 +34,44 @@ def _outputs(paths: DayPaths) -> list[dict]:
                 if f.suffix.lower() in (".mp4", ".jpg"):
                     seen[f.name] = {"name": f.name, "where": where}
     return sorted(seen.values(), key=lambda o: o["name"])
+
+
+_inferred: dict[tuple, dict | None] = {}
+
+
+def _infer_analysis(paths: DayPaths, present: set[str]) -> dict | None:
+    """For days analyzed before analysis.json existed: which stream the objects came from, by matching
+    the frame size in the object index against one recording of each stream on the share."""
+    from ..media import Recording, probe_size
+
+    index = paths.tubes / "index.json"
+    try:
+        key = (str(index), index.stat().st_mtime, tuple(sorted(present)))
+        if key in _inferred:
+            return _inferred[key]
+        with open(index) as fh:
+            head = fh.read(200)  # {"width":1920,"height":576,"tubes":[...]}: only the start is needed
+        m = re.match(r'\{"width":(\d+),"height":(\d+)', head)
+    except OSError:
+        return None
+    found = None
+    if m and int(m.group(1)):
+        size = (int(m.group(1)), int(m.group(2)))
+        for stream in ("main", "sub"):
+            name = next((n for n in sorted(present) if n.startswith(stream + "_") and n.endswith(".mp4")), None)
+            if not name:
+                continue
+            try:
+                w, h = probe_size(paths.raw / name)
+            except Exception:
+                continue
+            if abs(Recording(paths.raw / name, 0, 0, w, h).size[0] - size[0]) <= 2:
+                found = {"stream": stream, "source_size": [w, h], "size": list(size), "inferred": True}
+                break
+        else:
+            found = {"size": list(size), "inferred": True}
+    _inferred[key] = found
+    return found
 
 
 _refreshing: set[tuple[str, str]] = set()
@@ -86,6 +124,19 @@ def _scan(camera: str, day: str) -> dict:
             counts[cat] = counts.get(cat, 0) + 1
     outputs = _outputs(paths)
     analyzed = sum(counts.values()) > 0
+    try:
+        analysis = json.loads((paths.tubes / "analysis.json").read_text())
+    except (OSError, ValueError):
+        analysis = None  # not analyzed yet, or analyzed before settings were recorded
+    try:
+        present = {p.name for p in paths.raw.iterdir()} if paths.raw.is_dir() else set()
+    except OSError:
+        present = set()
+    names = [r["path"] for r in recordings]
+    if analysis is None and analyzed:
+        analysis = _infer_analysis(paths, present)
+    footage = {"stream": stream_of(names), "files": len(names), "downloaded": sum(n in present for n in names),
+               "other": stream_of(n for n in present if n.endswith(".mp4") and n not in names)}
     if any(o["name"].endswith(".mp4") for o in outputs):
         status = "rendered"
     elif analyzed:
@@ -99,6 +150,7 @@ def _scan(camera: str, day: str) -> dict:
         "recordings": len(recordings),
         "backgrounds": paths.backgrounds.is_dir() and any(paths.backgrounds.glob("*.jpg")),
         "counts": counts, "hourly": hourly, "hourly_by": hourly_by, "outputs": outputs,
+        "footage": footage, "analysis": analysis, "analyzed": analyzed,
     }
     _cache[key] = (time.monotonic(), info)
     return info

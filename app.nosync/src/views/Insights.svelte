@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { api, media, onJobEvents } from '../lib/api.js';
   import { longDay } from '../lib/format.js';
+  import SourceInfo from '../components/SourceInfo.svelte';
 
   let { params } = $props();
 
@@ -117,6 +118,7 @@
     </div>
   {/if}
   <p class="muted">{current.caption}</p>
+  {#if cam}<SourceInfo footage={cam.footage} analysis={cam.analysis} analyzed={cam.analyzed} />{/if}
 </div>
 
 <style>

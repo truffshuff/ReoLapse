@@ -41,6 +41,7 @@ analyze  raw ──► bg/NNN.jpg                    median of the empty scene p
                ► tubes/*.pkl                   one per moving object: timestamped masked crops
                ► tubes/index.json              spans and box paths (area search)
                ► tubes/checkpoint.json         while running: resume point
+               ► tubes/analysis.json           how it was analyzed: stream, sizes, model, imgsz, fps, types, when
                ► tubes/_pruned/*.pkl           set aside: vehicles that never really travelled
 render   tubes+bg ► out/synopsis_<style>_<color>.mp4 (+ .json timing sidecar), trails.jpg, strobe.jpg, heatmap.jpg
                   ► out/synopsis_<style>_<color>_<type>.mp4   only person / vehicle / animal (optional)

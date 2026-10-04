@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import Icon from '../components/Icon.svelte';
   import { api, media, onJobEvents } from '../lib/api.js';
-  import { longDay, shortDay, STATUS, CAT_LABEL } from '../lib/format.js';
+  import { longDay, shortDay, STATUS, CAT_LABEL, STREAM_NAME, modelName } from '../lib/format.js';
 
   let days = $state([]);
   let index = $state(0);
@@ -93,7 +93,10 @@
               </div>
               <div class="axis mono dim"><span>12a</span><span>6a</span><span>12p</span><span>6p</span><span>12a</span></div>
             </div>
-            <div class="muted small">{cam.recordings} recording files · {cam.outputs.length} outputs</div>
+            <div class="muted small">
+              {[STREAM_NAME[cam.footage?.stream], cam.analysis?.model && `${modelName(cam.analysis.model)} · ${cam.analysis.fps} fps`,
+                `${cam.recordings} recording files`, `${cam.outputs.length} outputs`].filter(Boolean).join(' · ')}
+            </div>
           </div>
         </article>
       {/each}

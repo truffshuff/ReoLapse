@@ -4,9 +4,10 @@
   // recording from the same moment. The live, in-app compositor replaces the MP4s in phase 3.
   import { onMount } from 'svelte';
   import { api, media, onJobEvents } from '../lib/api.js';
-  import { clock, longDay, parseClock, duration, CAT_LABEL } from '../lib/format.js';
+  import { clock, longDay, parseClock, duration, CAT_LABEL, STREAM_NAME } from '../lib/format.js';
   import RegionOverlay from '../components/RegionOverlay.svelte';
   import VideoState from '../components/VideoState.svelte';
+  import SourceInfo from '../components/SourceInfo.svelte';
   import { jobState } from '../lib/busy.svelte.js';
 
   let { params } = $props();
@@ -18,6 +19,7 @@
   let info = $state(null);
   let videoName = $state('');
   let synVideo = $state();
+  let meta = $state(null); // the video's sidecar: timing and the settings it was made with
   let length = $state(0); // synopsis seconds that span the 24 h day (from the render's sidecar)
   let synTime = $state(0);
   let originalAt = $state('12:00');
@@ -135,10 +137,11 @@
   $effect(() => {
     if (!videoName) return;
     length = 0;
+    meta = null;
     synState = 'loading';
     fetch(media.out(day, camera, videoName.replace(/\.mp4$/, '.json')))
       .then((r) => (r.ok ? r.json() : null))
-      .then((meta) => { if (meta?.length) length = meta.length; })
+      .then((m) => { meta = m; if (m?.length) length = m.length; })
       .catch(() => {});
   });
 
@@ -242,6 +245,10 @@
     {/if}
   </div>
 
+  {#if info && (videoName || info.analyzed)}
+    <SourceInfo footage={info.footage} analysis={meta?.analysis ?? info.analysis} analyzed={info.analyzed} render={meta} />
+  {/if}
+
   {#if showMissing && info}
     {@const mine = request && request.only === show && request.day === day && request.camera === camera ? request : null}
     <div class="notice panel">
@@ -327,6 +334,7 @@
         <input type="time" bind:value={originalAt} aria-label="Time of day" />
         <button class="btn" onclick={() => jumpTo(parseClock(originalAt))}>Go</button>
         {#if originalT != null}<span class="small muted">from {clock(originalT, true)}</span>{/if}
+        {#if info.footage?.stream}<span class="small muted push">{STREAM_NAME[info.footage.stream]} recording</span>{/if}
       </div>
       {#if originalSrc}
         <!-- svelte-ignore a11y_media_has_caption -->

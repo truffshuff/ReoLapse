@@ -22,7 +22,7 @@ import numpy as np
 
 from . import tube_index
 from .progress import clock, dur, emit
-from .config import CATEGORIES, MODEL_DIR, DayPaths
+from .config import CATEGORIES, MODEL_DIR, DayPaths, stream_of
 from .media import Recording, day_seconds, frames, keyframe_samples, load_recordings, prefetch
 
 BG_SLOT = 600  # seconds per background
@@ -516,6 +516,20 @@ def _backgrounds_match(paths: DayPaths, recs: list[Recording]) -> bool:
     return img is not None and (img.shape[1], img.shape[0]) == recs[0].size
 
 
+ANALYSIS_INFO = "analysis.json"
+
+
+def write_analysis_info(paths: DayPaths, recs: list[Recording], **settings) -> None:
+    """Record how this day was analyzed, next to its objects, so the app can show it."""
+    import os
+
+    info = {"stream": stream_of(r.path.name for r in recs), "source_size": [recs[0].width, recs[0].height],
+            "size": list(recs[0].size), **settings, "types": sorted(settings.get("types", [])),
+            "hours": list(settings.get("hours", (0, 24))),
+            "finished": datetime.now().isoformat(timespec="seconds"), "app": os.environ.get("REOLAPSE_APP_VERSION")}
+    (paths.tubes_out / ANALYSIS_INFO).write_text(json.dumps(info, indent=1))
+
+
 def run(cameras: list[str], day, *, fps: float, model: str, imgsz: int, types: set[str], skip_bg: bool,
         hours: tuple[float, float] = (0, 24)) -> None:
     for cam in cameras:
@@ -555,6 +569,7 @@ def run(cameras: list[str], day, *, fps: float, model: str, imgsz: int, types: s
         stats = detect_tubes(paths, recs, windows, fps, model, imgsz, backgrounds=inline)
         if inline is not None:
             mark_backgrounds_complete(paths.backgrounds_out, size)
+        write_analysis_info(paths, recs, fps=fps, model=model, imgsz=imgsz, types=types, hours=hours)
         found = ", ".join(f"{n} {k}{'s' if n != 1 and k != 'person' else ''}".replace("person", "people" if n != 1 else "person")
                           for k, n in stats.most_common()) or "nothing that moved"
         print(f"   {cam} finished in {dur(time.monotonic() - cam_t0)}: {sum(stats.values())} moving objects ({found})")

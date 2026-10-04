@@ -54,6 +54,12 @@ card opens it in the Player. Use ‹ › or the *Recent days* strip to change da
 
   ![People only](screenshots/player-people.jpg)
 
+- **Settings line** (under the controls; also on Insights): the footage on the share (*Clear* or
+  *Fluent*, and how much of it is downloaded), what the objects were found in (stream, picture size,
+  model, detector size, frame rate, when) and how the video was rendered. Days analyzed before v0.1.12
+  show only the stream. If a day was analyzed on a different stream than the footage now downloaded
+  (Fluent results, Clear footage), it says so: run *Find moving objects* again to use the new footage.
+  Today's cards and the All cameras tiles show each camera's stream too.
 - **Activity graph**: how many objects appeared in each hour, with a scale on the left; it follows
   **Show**, so with *Vehicles* selected it counts only vehicles. Hover a bar for its count. Click
   anywhere to jump the synopsis to that time **and** load the original recording from that moment below. The white line follows the synopsis; the orange line marks where

@@ -75,6 +75,12 @@ CATEGORIES = {
 }
 
 
+def stream_of(names) -> str | None:
+    """'main' (Clear), 'sub' (Fluent), 'mixed', or None, from recording file names like main_20261001_000000.mp4."""
+    kinds = {Path(n).name.split("_")[0] for n in names}
+    return None if not kinds else kinds.pop() if len(kinds) == 1 else "mixed"
+
+
 def slug(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
 
