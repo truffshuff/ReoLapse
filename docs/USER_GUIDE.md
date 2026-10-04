@@ -48,13 +48,15 @@ card opens it in the Player. Use ‹ › or the *Recent days* strip to change da
   Which ones are rendered is set in Settings → Rendering defaults.
 - **Show**: *Everything*, or a video of just the **People**, **Vehicles** or **Animals**. With fewer objects
   these are shorter and much easier to follow: no traffic in the way of the people on the driveway.
-  Types that weren't seen that day aren't offered. A dimmed choice hasn't been rendered yet; its
-  tooltip says how (a Render job with *Only*, or the switches in Settings → Rendering defaults).
+  Types that weren't seen that day aren't offered. A dimmed choice hasn't been rendered for that day
+  yet: click it and **Make … video** queues it (a few minutes); it replaces the full video as soon as
+  it's done. To get them for every day, switch them on in Settings → Rendering defaults.
 
   ![People only](screenshots/player-people.jpg)
 
-- **Activity graph**: click anywhere to jump the synopsis to that time **and** load the original
-  recording from that moment below. The white line follows the synopsis; the orange line marks where
+- **Activity graph**: how many objects appeared in each hour, with a scale on the left; it follows
+  **Show**, so with *Vehicles* selected it counts only vehicles. Hover a bar for its count. Click
+  anywhere to jump the synopsis to that time **and** load the original recording from that moment below. The white line follows the synopsis; the orange line marks where
   the original footage is from.
 - **Original footage**: or type a time and press **Go**.
 

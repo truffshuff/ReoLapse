@@ -73,13 +73,16 @@ def _scan(camera: str, day: str) -> dict:
     recordings = json.loads(paths.files_index.read_text()) if paths.files_index.exists() else []
     counts = {"person": 0, "vehicle": 0, "animal": 0}
     hourly = [0] * 24
+    hourly_by = {k: [0] * 24 for k in counts}  # objects starting in each hour, per type
     if paths.tubes.is_dir():
         for p in paths.tubes.glob("*.pkl"):
             t0, cat = (p.stem.split("_") + [""])[:2]  # 036000.0_person[_2]
             try:
-                hourly[min(23, int(float(t0) // 3600))] += 1
+                hour = min(23, int(float(t0) // 3600))
             except ValueError:
                 continue
+            hourly[hour] += 1
+            hourly_by.setdefault(cat, [0] * 24)[hour] += 1
             counts[cat] = counts.get(cat, 0) + 1
     outputs = _outputs(paths)
     analyzed = sum(counts.values()) > 0
@@ -95,7 +98,7 @@ def _scan(camera: str, day: str) -> dict:
         "camera": camera, "day": day, "status": status,
         "recordings": len(recordings),
         "backgrounds": paths.backgrounds.is_dir() and any(paths.backgrounds.glob("*.jpg")),
-        "counts": counts, "hourly": hourly, "outputs": outputs,
+        "counts": counts, "hourly": hourly, "hourly_by": hourly_by, "outputs": outputs,
     }
     _cache[key] = (time.monotonic(), info)
     return info

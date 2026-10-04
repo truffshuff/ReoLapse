@@ -113,6 +113,8 @@ def test_library_status(env):
         assert cam["status"] == "rendered"
         assert cam["counts"] == {"person": 2, "vehicle": 1, "animal": 0}
         assert cam["hourly"][10] == 2 and cam["hourly"][17] == 1
+        by = cam["hourly_by"]
+        assert sum(by[k][10] for k in by) == 2 and sum(by[k][17] for k in by) == 1
         r = client.get("/api/days/2026-10-01/Garage/out/synopsis_cutout_category.mp4")
         assert r.status_code == 200 and len(r.content) == 10
         assert client.get("/api/days/2026-10-01/Garage/out/..%2Fsecret").status_code == 404

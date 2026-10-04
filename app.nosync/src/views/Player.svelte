@@ -3,7 +3,7 @@
   // Clicking the activity graph moves the synopsis to that time of day and loads the original
   // recording from the same moment. The live, in-app compositor replaces the MP4s in phase 3.
   import { onMount } from 'svelte';
-  import { api, media } from '../lib/api.js';
+  import { api, media, onJobEvents } from '../lib/api.js';
   import { clock, longDay, parseClock, duration, CAT_LABEL } from '../lib/format.js';
   import RegionOverlay from '../components/RegionOverlay.svelte';
   import VideoState from '../components/VideoState.svelte';
@@ -43,14 +43,47 @@
   const STYLE_NAMES = ['cutout', 'ghost', 'outline'];
   const SHOW = [['all', 'Everything'], ['person', 'People'], ['vehicle', 'Vehicles'], ['animal', 'Animals']];
   const current = $derived(videos.find((v) => v.name === videoName));
+  // Which objects the Show buttons and the graph are on; a type without its own video yet keeps
+  // the full video playing and offers to render one.
+  let show = $state('all');
+  let request = $state(null); // { job, only, status, frac } for a type video queued from here
+  const showLabel = $derived(SHOW.find(([k]) => k === show)?.[1].toLowerCase() ?? '');
+  const showMissing = $derived(show !== 'all' && !videos.some((v) => v.only === show));
   const has = (style, only) => videos.some((v) => v.style === style && v.only === only);
   // switch one control and keep the other where possible
   function choose(style, only) {
     const pick = videos.find((v) => v.style === style && v.only === only)
-      ?? videos.find((v) => v.only === only) ?? videos.find((v) => v.style === style);
+      ?? videos.find((v) => v.only === only) ?? videos.find((v) => v.style === style && v.only === 'all');
     if (pick) videoName = pick.name;
   }
+
+  function pickShow(k) {
+    show = k;
+    if (videos.some((v) => v.only === k)) choose(current?.style ?? 'cutout', k);
+    else if (current?.only !== 'all') choose(current?.style ?? 'cutout', 'all');
+  }
+
+  async function renderType(only) {
+    const d = day, c = camera;
+    try {
+      const job = await api.submit('render', d, [c], { only: [only] });
+      request = { job: job.id, day: d, camera: c, only, status: job.status, frac: 0, error: '' };
+    } catch (e) {
+      request = { job: null, day: d, camera: c, only, status: 'failed', frac: 0, error: e.message };
+    }
+  }
+
+  async function onJob(job) {
+    if (!request || job.id !== request.job) return;
+    request = { ...request, status: job.status, frac: job.progress?.frac ?? request.frac, waiting: job.waiting };
+    if (job.status === 'done' && request.day === day && request.camera === camera) {
+      info = await api.cameraDay(day, camera, true);
+      if (show === request.only) choose(current?.style ?? 'cutout', show);
+    }
+  }
   const dayT = $derived(length ? Math.min(86399, (synTime / length) * 86400) : null);
+
+  onMount(() => onJobEvents({ job: (e) => onJob(e.job) }));
 
   onMount(async () => {
     days = await api.days();
@@ -72,6 +105,7 @@
       videoName = (vids.find((v) => v.name.includes('cutout')) ?? vids[0] ?? x.outputs.find((o) => o.name.endsWith('.mp4')))?.name ?? '';
       originalSrc = '';
       originalT = null;
+      show = 'all';
       regions = [];
       found = null;
     });
@@ -112,10 +146,15 @@
     if (!length && synVideo?.duration) length = synVideo.duration;
   }
 
-  function bars(hourly) {
-    const max = Math.max(1, ...hourly);
-    return hourly.map((v) => Math.round((56 * v) / max));
+  // The graph's scale: a round top value with an integer midpoint (2, 4, 6, 8, 10, 20, 40…).
+  function niceMax(m) {
+    if (m <= 2) return 2;
+    const p = 10 ** Math.floor(Math.log10(m));
+    return [1, 2, 4, 6, 8, 10].map((f) => f * p).find((v) => v >= m);
   }
+  const hourly = $derived(show === 'all' ? info?.hourly : info?.hourly_by?.[show] ?? info?.hourly);
+  const yMax = $derived(niceMax(Math.max(0, ...(hourly ?? [0]))));
+  const PLOT = 54; // px of bar height that yMax fills (the .timeline CSS leaves exactly this)
 
   function toInput(t) {
     return `${String(Math.floor(t / 3600)).padStart(2, '0')}:${String(Math.floor((t % 3600) / 60)).padStart(2, '0')}`;
@@ -188,8 +227,8 @@
       </div>
       <div class="seg" role="group" aria-label="Show">
         {#each SHOW.filter(([k]) => k === 'all' || (info?.counts?.[k] ?? 0) > 0) as [k, label]}
-          <button aria-pressed={current.only === k} onclick={() => choose(current.style, k)} class:missing={!videos.some((v) => v.only === k)}
-                  title={videos.some((v) => v.only === k) ? '' : `Not rendered yet: queue a Render job with "Only ${label.toLowerCase()}" in Jobs, or switch it on in Settings → Rendering defaults`}>{label}</button>
+          <button aria-pressed={show === k} onclick={() => pickShow(k)} class:missing={!videos.some((v) => v.only === k)}
+                  title={videos.some((v) => v.only === k) ? '' : `No ${label.toLowerCase()}-only video for this day yet: click to make one`}>{label}</button>
         {/each}
       </div>
     {/if}
@@ -202,6 +241,23 @@
       </div>
     {/if}
   </div>
+
+  {#if showMissing && info}
+    {@const mine = request && request.only === show && request.day === day && request.camera === camera ? request : null}
+    <div class="notice panel">
+      {#if mine && (mine.status === 'queued' || mine.status === 'running')}
+        <span>Making the {showLabel}-only video (job {mine.job}){mine.status === 'running'
+          ? `: ${Math.round(mine.frac * 100)}%` : mine.waiting ? `: ${mine.waiting}` : ': queued'}. It appears here when it's done;
+          the graph below already shows just the {showLabel}.</span>
+      {:else}
+        <span>There's no {showLabel}-only video for {camera} on this day yet, so the full video keeps playing; the graph
+          below shows just the {showLabel}. Making one takes a few minutes.</span>
+        <button class="btn primary" onclick={() => renderType(show)}>Make {showLabel} video</button>
+        {#if mine?.status === 'failed' || mine?.status === 'cancelled'}<span class="err small">Job {mine.job ?? ''} {mine.status}{mine.error ? `: ${mine.error}` : ''}; see Jobs.</span>{/if}
+        <span class="small muted">To make them for every day, switch them on in <a href="#/settings">Settings → Rendering defaults</a>.</span>
+      {/if}
+    </div>
+  {/if}
 
   {#if regions.length}
     <section class="panel found" aria-label="Objects in the selected areas">
@@ -241,18 +297,28 @@
   {#if info}
     <section aria-label="Activity by hour" class="tl-wrap">
       <div class="tl-head">
-        <span class="small muted">Click the graph to jump the synopsis there and show the original footage</span>
+        <span class="small"><span class="dot {show}"></span> {show === 'all' ? 'Objects' : SHOW.find(([k]) => k === show)[1]} per hour</span>
+        <span class="small muted">· click the graph to jump the synopsis there and show the original footage</span>
         {#if dayT != null}<span class="mono small push">synopsis at {clock(dayT)}</span>{/if}
       </div>
-      <div class="timeline">
-        {#each bars(info.hourly) as h, i}
-          <button style:--h="{Math.max(1, h)}px" aria-label="Jump to {clock(i * 3600)}" title="Jump to {clock(i * 3600)}–{clock((i + 1) * 3600)}"
-                  onclick={(e) => onBarClick(e, i)}></button>
-        {/each}
-        {#if dayT != null}<div class="playhead" style:left="{(dayT / 86400) * 100}%" aria-hidden="true"></div>{/if}
-        {#if originalT != null}<div class="orig" style:left="{(originalT / 86400) * 100}%" aria-hidden="true"></div>{/if}
+      <div class="chart">
+        <div class="yaxis mono dim" aria-hidden="true">
+          <span style:bottom="{PLOT + 1}px">{yMax}</span><span style:bottom="{PLOT / 2 + 1}px">{yMax / 2}</span><span style:bottom="1px">0</span>
+        </div>
+        <div class="timeline {show}">
+          <div class="grid-line" style:bottom="{PLOT / 2}px" aria-hidden="true"></div>
+          <div class="grid-line" style:bottom="{PLOT}px" aria-hidden="true"></div>
+          {#each hourly as v, i}
+            {@const what = show === 'all' ? (v === 1 ? 'object' : 'objects') : v === 1 ? show : CAT_LABEL[show]}
+            <button style:--h="{v ? Math.max(2, (PLOT * v) / yMax) : 0}px" aria-label="{clock(i * 3600)}: {v} {what}; jump there"
+                    title="{clock(i * 3600)}–{clock((i + 1) * 3600)}: {v} {what}" onclick={(e) => onBarClick(e, i)}></button>
+          {/each}
+          {#if dayT != null}<div class="playhead" style:left="{(dayT / 86400) * 100}%" aria-hidden="true"></div>{/if}
+          {#if originalT != null}<div class="orig" style:left="{(originalT / 86400) * 100}%" aria-hidden="true"></div>{/if}
+        </div>
+        <span></span>
+        <div class="axis mono dim"><span>12a</span><span>3a</span><span>6a</span><span>9a</span><span>12p</span><span>3p</span><span>6p</span><span>9p</span><span>12a</span></div>
       </div>
-      <div class="axis mono dim"><span>12a</span><span>3a</span><span>6a</span><span>9a</span><span>12p</span><span>3p</span><span>6p</span><span>9p</span><span>12a</span></div>
     </section>
 
     <section class="panel original" aria-label="Original footage">
@@ -298,14 +364,22 @@
   video { width: 100%; display: block; background: #000; }
   .tl-wrap { display: flex; flex-direction: column; gap: 6px; }
   .tl-head { display: flex; align-items: center; gap: 12px; }
-  .timeline { position: relative; display: flex; align-items: flex-end; gap: 3px; height: 64px; padding: 0 3px; border-radius: 8px;
-              background: var(--rail); border: 1px solid var(--line); }
+  .chart { display: grid; grid-template-columns: auto 1fr; column-gap: 8px; row-gap: 6px; }
+  .yaxis { position: relative; height: 64px; font-size: 11px; line-height: 1; min-width: 3ch; }
+  .yaxis span { position: absolute; right: 0; transform: translateY(50%); }
+  /* 64 px box: 1 px borders + 8 px headroom leave PLOT (54 px) for the bars */
+  .timeline { position: relative; display: flex; align-items: flex-end; gap: 3px; height: 64px; padding: 8px 3px 0; border-radius: 8px;
+              background: var(--rail); border: 1px solid var(--line); box-sizing: border-box; }
+  .grid-line { position: absolute; left: 0; right: 0; height: 0; border-top: 1px dashed rgba(255, 255, 255, 0.08); pointer-events: none; }
+  .timeline.person { --bar: var(--person); } .timeline.vehicle { --bar: var(--vehicle); } .timeline.animal { --bar: var(--animal); }
+  .notice { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 13.5px; }
+  .dot.all { background: var(--accent); }
   /* whole column is the click target; the bar is drawn inside it */
   .timeline button { flex: 1; height: 100%; padding: 0; border: 0; background: transparent; position: relative; cursor: crosshair; }
   .timeline button::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: var(--h);
-                            border-radius: 2px 2px 0 0; background: var(--accent); }
+                            border-radius: 2px 2px 0 0; background: var(--bar, var(--accent)); }
   .timeline button:hover { background: rgba(142, 168, 255, 0.08); }
-  .timeline button:hover::after { background: #B7C7FF; }
+  .timeline button:hover::after { filter: brightness(1.25); }
   .playhead { position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; background: var(--text); pointer-events: none; }
   .orig { position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; background: var(--person); pointer-events: none; }
   .axis { display: flex; justify-content: space-between; font-size: 11px; }
