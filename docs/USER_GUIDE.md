@@ -7,6 +7,7 @@
 - [Insights](#insights)
 - [Jobs](#jobs): lanes, pausing, logs
 - [Settings](#settings): NVR, cameras and streams, analysis, rendering, storage, updates
+- [What counts as a moving object](#what-counts-as-a-moving-object)
 - [How long things take](#how-long-things-take)
 - [Troubleshooting](#troubleshooting)
 
@@ -25,6 +26,8 @@
    - **Storage**: the **archive folder** (where downloads and finished videos go, normally your NAS
      share) and the **working folder** (*Use this Mac's drive* is fastest).
    - **Save changes**.
+   - **Updates** (optional): a read-only GitHub token so Reolapse can tell you about new versions
+     and download them; see [Updates](#updates).
 3. Open **Jobs**, pick yesterday, keep *Everything*, **Queue job**.
 
 ## Today
@@ -41,8 +44,15 @@ card opens it in the Player. Use ‹ › or the *Recent days* strip to change da
 
 - **Synopsis video**: the day's moving objects over a time-lapse of the scene. The clock (bottom left)
   shows the time of day the background is at; each object's tag shows its own real time.
-- **Versions**: *cutout* (solid), *ghost* (see-through, easier when busy), *outline* (colored edge).
+- **Style**: *cutout* (solid), *ghost* (see-through, easier when busy), *outline* (colored edge).
   Which ones are rendered is set in Settings → Rendering defaults.
+- **Show**: *Everything*, or a video of just the **People**, **Vehicles** or **Animals**. With fewer objects
+  these are shorter and much easier to follow: no traffic in the way of the people on the driveway.
+  Types that weren't seen that day aren't offered. A dimmed choice hasn't been rendered yet; its
+  tooltip says how (a Render job with *Only*, or the switches in Settings → Rendering defaults).
+
+  ![People only](screenshots/player-people.jpg)
+
 - **Activity graph**: click anywhere to jump the synopsis to that time **and** load the original
   recording from that moment below. The white line follows the synopsis; the orange line marks where
   the original footage is from.
@@ -94,7 +104,8 @@ Each camera's clip starts at its nearest keyframe, so cameras can be up to about
 
 **Process a day** queues work for a day and cameras. *Everything* becomes three jobs: **Download** →
 **Find moving objects** → **Render**. Single steps are useful to redo part of a day, e.g. *Render* after
-changing the styles in Settings.
+changing the styles in Settings. A single *Render* can be limited with **Only** (People, Vehicles or
+Animals) to add just that video to an already rendered day, in a few minutes.
 
 **Two lanes** run at the same time, one job each:
 
@@ -107,7 +118,8 @@ So the next day can download while an earlier day is being analyzed. A day's ste
 its analysis waits for its download, its render for its analysis. A waiting job says why
 ("waits for this day's download (job 4)").
 
-- **Up next**: ↑ ↓ reorder queued jobs; **Cancel** removes one.
+- **Up next**: ↑ ↓ reorder queued jobs (also while the queue is paused: pause, move a job to the top,
+  resume, and it runs next); **Cancel** removes one.
 - **Finished**: **Retry** re-queues a failed or cancelled job. Work already done is skipped (finished
   downloads are kept; analysis continues from its last checkpoint). **Remove** takes a job (and its log)
   off the list; **Clear finished** removes them all. Downloads, results and videos aren't touched.
@@ -158,6 +170,10 @@ Styles (one video each), tag colors (by type, or by time of day), **allowed time
 object may be moved from its real time to reduce overlap; 0 = exact), **object speed**, and **objects on
 screen** (sets the automatic video length).
 
+**Also render a video of only…** People / Vehicles / Animals: each switch adds one more video per camera
+and day (in the first style), made with every Render from then on. They are quick: a people-only video
+of a busy day renders in a minute or two.
+
 ### Storage
 
 - **Archive folder**: downloads, NVR event lists, finished videos and stills (your share).
@@ -176,11 +192,29 @@ read-only token once:
    **Permissions**: *Contents: Read-only*. Pick an expiry (a year is fine).
 3. Paste it into Settings → **Updates** → **Save token**. It's kept in the macOS Keychain.
 
+![Updates](screenshots/settings-updates.jpg)
+
 With *Check when Reolapse opens* on, a newer version shows **Update available** in the sidebar.
 **Download** saves the `.dmg` to Downloads and opens it: quit Reolapse (⌘Q; queued and running jobs
 continue next time), drag Reolapse onto Applications, choose **Replace**, and open it again. The app
 isn't signed by Apple, so it can't replace itself. Settings, the NVR login and processed days are kept;
 the first launch of a new version rebuilds the engine (a minute or two).
+
+## What counts as a moving object
+
+Reolapse keeps people, vehicles and animals **while they move**. A parked car's detection box wobbles a
+little from frame to frame, which can look like movement for a moment, so a **vehicle only counts if it
+travels at least half its own size** (a car driving in or out of view covers far more). People and
+animals aren't held to that: someone gardening or standing at the door barely travels but is real.
+An object that stops for a few seconds ends; it continues as a new one when it moves again.
+
+Objects that don't pass the check are set aside in the day's `tubes/_pruned` folder rather than deleted.
+Days analyzed with v0.1.2 or earlier still contain parked-car blips: either queue *Find moving objects*
+for that day again, or (much faster) run the check on what's already there and then queue a *Render*:
+
+```
+"$HOME/Library/Application Support/Reolapse/engine/bin/python" -m reolapse prune --day 2026-09-28
+```
 
 ## How long things take
 
@@ -190,7 +224,8 @@ Measured on an M2 MacBook over Wi-Fi to an SMB share:
 |---|---|---|
 | Download, Garage (1920×576 vs 5120×1552) | ~8 min, 5.8 GB | ~45 min, 36–60 GB |
 | Find moving objects, whole day, 5 fps, nano | 45–90 min | several hours |
-| Render, one style | 5–15 min | 5–15 min |
+| Render, one style, all objects | 2–15 min | 2–15 min |
+| Render, one type only (e.g. people) | 1–3 min | 1–3 min |
 
 Heavier analysis settings multiply: 10 fps ×2, *medium* model ×4, detector size 1920 ×2. Wired Ethernet
 to the share makes Clear processing several times faster than Wi-Fi.
@@ -203,6 +238,8 @@ to the share makes Clear processing several times faster than Wi-Fi.
 | Test connection fails / downloads 404 | Check the login; passwords with `& # %` or spaces don't work with the NVR API. Downloads retry automatically with a fresh login (the NVR's session expires after about an hour). |
 | Footage loads slowly or pages show "Loading…" | A download is using the network (especially Clear). The note under the video says so; it speeds up when the download lane is idle. |
 | The queue says "paused: the network share isn't reachable" | Mount the share (Finder → Go → Connect to Server). The queue resumes by itself. |
+| Lots of "vehicles" that are really parked cars | The day was analyzed before v0.1.3: see [What counts as a moving object](#what-counts-as-a-moving-object). |
+| The Jobs list is long | **Remove** on a finished job, or **Clear finished**. |
 | A camera's day shows *Downloaded* but no objects | Its analysis hasn't run or failed: check Jobs → Finished, and **Retry**. |
 | No recordings for a day | The NVR only keeps footage for a few days (fewer with Clear on every camera); queue recent days. |
 | "GitHub refused the token" | It expired or lacks *Contents: Read-only* on the ReoLapse repository: make a new one (Settings → Updates). |

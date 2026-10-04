@@ -17,10 +17,10 @@ src/reolapse/          Python package (pipeline, CLI, API server)
   fetch.py             download a day's recordings + NVR event list, remux to seekable MP4
   media.py             ffmpeg frame access (hardware decode for big streams), remux
   analyze.py           backgrounds, motion gate, YOLO-seg + ByteTrack, tubes, checkpoints
-  tube_index.py        per-day index of objects (spans and box paths) for area search
+  tube_index.py        per-day index of objects (spans and box paths) for area search; parked-car filter
   render.py            synopsis placement and video, trails / group shot / heatmap stills
   settings.py, config.py   app settings (JSON) and paths
-  server/              FastAPI app, job queue/scheduler, library scan
+  server/              FastAPI app, job queue/scheduler, library scan, update check
 app.nosync/            Electron + Svelte desktop app (".nosync" keeps node_modules out of iCloud)
   src/                 UI (Svelte 5, Vite)
   electron/            main process (server lifecycle, first-run setup window)
@@ -41,7 +41,9 @@ analyze  raw ──► bg/NNN.jpg                    median of the empty scene p
                ► tubes/*.pkl                   one per moving object: timestamped masked crops
                ► tubes/index.json              spans and box paths (area search)
                ► tubes/checkpoint.json         while running: resume point
+               ► tubes/_pruned/*.pkl           set aside: vehicles that never really travelled
 render   tubes+bg ► out/synopsis_<style>_<color>.mp4 (+ .json timing sidecar), trails.jpg, strobe.jpg, heatmap.jpg
+                  ► out/synopsis_<style>_<color>_<type>.mp4   only person / vehicle / animal (optional)
 ```
 
 **Download.** The RLN16 NVR only serves *whole recording files* (`cmd=Download` with the search
@@ -53,8 +55,12 @@ after about an hour).
 **Find moving objects.** Frames are decoded at 5 or 10 fps (`ffmpeg`; streams wider than 2560 px use
 VideoToolbox and are scaled on the GPU). A motion gate (low-res frame differencing, speckle removal,
 thresholds tuned on a noisy 640×360 night stream) decides which frames reach YOLO; batches of 8 run at
-fp16 on MPS and are tracked with ByteTrack. A track becomes a *tube* only while it moves; parked cars
-never do, and an object that stops for a few seconds ends its tube. Stationary objects a moving one came
+fp16 on MPS and are tracked with ByteTrack. A track becomes a *tube* only while it moves, and an object
+that stops for a few seconds ends its tube. That short-window test is fooled by a parked car whose box
+wobbles, so a vehicle tube is kept only if its centre gets at least 0.5 × its median box diagonal away
+from its (median-smoothed) start (`tube_index.really_moved`; people and animals aren't filtered, since
+those that barely travel were real). Rejected tubes are moved to `tubes/_pruned/` at the end of a scan,
+and `reolapse prune` applies the same check to days analyzed before it existed. Stationary objects a moving one came
 near (the parked car someone reaches into) are saved with it as *context*. For whole-day scans the
 background medians are built from the same decoded frames, so each recording is read once. A checkpoint
 every 2 minutes of footage makes the scan resumable.
@@ -62,7 +68,9 @@ every 2 minutes of footage makes the scan resumable.
 **Render.** Each tube is placed near its real time of day (`video_t = day_t / 86400 × length`), shifted
 by at most the allowed drift where that removes real overlap, and composited over cross-faded
 background medians; tags show each frame's real time. The timing sidecar lets the app map time of day
-to video time.
+to video time. *Only* renders (`--only person`, or `render.per_type` in Settings, which adds
+`--per-type` to app jobs) filter the tubes by category, size the video for that smaller set, and skip
+the stills.
 
 ## Running from source
 
@@ -82,8 +90,10 @@ Paths and settings: `REOLAPSE_DATA` (archive), `REOLAPSE_WORK` (working folder),
 uv run reolapse probe   [--day D]                         # NVR channels, a day's events and sizes
 uv run reolapse fetch   [--day D] [--camera C …] [--stream sub|main]
 uv run reolapse analyze [--day D] [--fps 5] [--model yolo26n-seg.pt] [--imgsz 1280] [--types all] [--hours 7-9]
-uv run reolapse render  [--day D] [--style cutout,ghost,outline] [--color category|time] [--drift 10] …
+uv run reolapse render  [--day D] [--style cutout,ghost,outline] [--color category|time] [--drift 10]
+                        [--only person,vehicle,animal] [--per-type person,…] [--no-stills] …
 uv run reolapse run     …                                 # fetch + analyze + render
+uv run reolapse prune   [--day D] [--camera C …]         # set aside vehicles that never travelled
 uv run reolapse serve   [--port 8765]
 ```
 
@@ -105,11 +115,14 @@ progress; with `REOLAPSE_PROGRESS=json` it also prints `@@{json}` progress lines
 | `GET /api/days/{day}/{camera}/objects/{id}/thumb` | an object's cutout |
 | `GET/POST /api/jobs`, `GET /api/jobs/{id}`, `…/log` | queue (kind `run` becomes three jobs), status, full log file |
 | `POST /api/jobs/{id}/cancel`, `…/retry`, `…/move?delta=±1` | cancel, retry, reorder |
+| `DELETE /api/jobs/{id}`, `DELETE /api/jobs` | remove one finished job, or all of them (with logs) |
 | `GET /api/queue`, `POST /api/queue/pause`, `…/resume` | pause state |
-| `GET /api/events` | server-sent events: `snapshot`, `job`, `queue` |
+| `GET /api/events` | server-sent events: `snapshot`, `job`, `queue`, `removed` |
 | `GET/PUT /api/settings` | settings |
 | `GET/PUT /api/nvr`, `POST /api/nvr/test` | NVR login (password to the Keychain), connection test |
 | `GET /api/models` | detection models and whether they're downloaded |
+| `GET /api/update?check=&force=` | app version, latest GitHub release and notes (checked at most hourly) |
+| `PUT /api/update/token`, `POST /api/update/download` | GitHub token to the Keychain; download the `.dmg` to ~/Downloads and open it |
 
 **Job queue.** Two lanes (download; processing) run concurrently, one job each; within a lane jobs start
 in queue order; a day's steps keep their order. Jobs run as `python -m reolapse …` subprocesses in their
@@ -131,7 +144,14 @@ UI development: `uv run reolapse serve`, `npm run dev` (Vite on :5173, proxies /
 Packaged, the app carries the Python project, `uv` and a static ffmpeg as resources. On first launch (and
 after an update) it runs `uv sync --frozen --no-dev --no-editable` into
 `~/Library/Application Support/Reolapse/engine` with a uv-managed Python, then starts
-`engine/bin/python -m reolapse serve` with the bundled tools on `PATH`.
+`engine/bin/python -m reolapse serve` with the bundled tools on `PATH` and `REOLAPSE_APP_VERSION` set
+to the app's version (from source the server reads `app.nosync/package.json`).
+
+**Updates.** The app is ad-hoc signed, so it can't update itself in place (Squirrel/electron-updater
+need a Developer ID signature). `server/updates.py` asks the GitHub API for the latest release of
+`settings.updates.repo` with a fine-grained token (Contents: read) stored in the Keychain under
+"Reolapse GitHub", compares versions, and streams the `.dmg` asset to `~/Downloads` and opens it; the
+user drags it into Applications. The UI checks once at launch when `updates.check_on_launch` is on.
 
 ## Releases
 
@@ -146,6 +166,8 @@ git push origin v0.2.0
 UI, runs `scripts/prepare-release.sh` (engine source, uv, ffmpeg/ffprobe from martin-riedl.de), packages
 an ad-hoc-signed `.dmg` with electron-builder and publishes a GitHub Release with
 `.github/release-notes.md`. *Run workflow* builds without releasing and keeps the `.dmg` as an artifact.
+Installed apps find the new version through `releases/latest`, so a release must not be a draft or
+pre-release and must carry the `.dmg` asset; that happens when the build finishes (about 10 minutes).
 
 Local build: `npm run release:mac -- --config.directories.output=/tmp/reolapse-release`; the output must
 be outside `~/Documents` (see below).

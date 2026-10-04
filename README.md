@@ -19,11 +19,12 @@ never sends footage anywhere.
 | | |
 |---|---|
 | ![Today](docs/screenshots/today.jpg) | **Today**: one card per camera with a preview, how many people, vehicles and animals were seen, and when the day was busiest. |
-| ![Player](docs/screenshots/player.jpg) | **Player**: watch the synopsis in *cutout*, *ghost* or *outline* style. Click the activity graph to jump to any time and see the **original footage** from that moment underneath. |
+| ![Player](docs/screenshots/player.jpg) | **Player**: watch the synopsis in *cutout*, *ghost* or *outline* style, with everything or just the **people**, **vehicles** or **animals**. Click the activity graph to jump to any time and see the **original footage** from that moment underneath. |
 | ![Find in area](docs/screenshots/find-in-area.jpg) | **Find in area**: draw boxes on the picture (the driveway, the front door…) and get every object that passed through, with a cutout and the time; click one to jump there. |
 | ![All cameras](docs/screenshots/all-cameras.jpg) | **All cameras**: every camera's real recording from the same second, played together. Pick an event detected on any camera and all of them jump to it, so you can follow someone from one view to the next. |
 | ![Insights](docs/screenshots/insights-trails.jpg) | **Insights**: every path of the day colored by time, a heatmap of where things moved, and a "group shot" of everyone who came by. |
 | ![Jobs](docs/screenshots/jobs.jpg) | **Jobs**: download, find objects and render, in two lanes that run side by side, with live progress, readable logs, reordering, retry, and pause/resume (automatic when the laptop leaves home). |
+| ![Settings](docs/screenshots/settings.jpg) | **Settings**: the NVR login (kept in the Keychain), which cameras and which stream (Fluent or Clear), analysis and rendering choices with an explanation for each, where files go, and **Check for updates**. |
 
 The three synopsis styles, at the same moment:
 
@@ -44,6 +45,11 @@ The three synopsis styles, at the same moment:
    folder** (*Use this Mac's drive*).
 5. In **Jobs**, pick a day, choose *Everything*, and queue it.
 
+**Updating:** Settings → **Updates** checks this repository's releases and downloads the new `.dmg`
+for you (it needs a read-only GitHub token once, since the repository is private; see the
+[user guide](docs/USER_GUIDE.md#updates)). Open it and drag Reolapse onto Applications to replace the
+old version; settings, login, queued jobs and processed days carry over.
+
 The **[User guide](docs/USER_GUIDE.md)** covers every screen and setting, what the Fluent/Clear and
 detector choices cost, the job queue, and troubleshooting.
 
@@ -60,8 +66,9 @@ detector choices cost, the job queue, and troubleshooting.
 ## How it works, briefly
 
 **Download** the day's recordings → **find moving objects** (a cheap motion check picks the frames that
-go to a YOLO segmentation model on the Mac's GPU; objects are tracked, parked cars are ignored, and each
-moving object becomes a *tube* of cutouts) → **render** (tubes are placed over 10-minute background
+go to a YOLO segmentation model on the Mac's GPU; objects are tracked; parked cars are ignored, because a
+vehicle has to travel at least half its own size to count; and each moving object becomes a *tube*
+of cutouts) → **render** (tubes are placed over 10-minute background
 medians near their real time of day). The full picture, the command line, the local API and how releases
 are built are in **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**.
 
@@ -72,6 +79,8 @@ Everything the app does also works from a source checkout:
 ```
 uv run reolapse probe                    # check the NVR connection; a day's events and sizes
 uv run reolapse run --day 2026-10-01     # download, find objects and render one day
+uv run reolapse render --day 2026-10-01 --only person   # a people-only video
+uv run reolapse prune --day 2026-09-28   # drop parked-car "objects" from a day analyzed before v0.1.3
 uv run reolapse serve                    # the local API and UI at http://127.0.0.1:8765
 ```
 
