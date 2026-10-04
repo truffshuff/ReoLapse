@@ -156,6 +156,24 @@ def event_windows(paths: DayPaths, types: set[str]) -> list[tuple[float, float]]
 
 # ---------------------------------------------------------------- tracking
 
+# A person the detector struggles with (bent over, cut off by the frame edge, washed out by IR) gets
+# called a dog or a bird in many frames, but rarely the other way round: on Oct 1 at 19:16 the nano
+# model said person in 12 of 25 frames and bird/dog in 10, and the plain majority went to "bird".
+# So an "animal" track that is a person in at least a third of its frames counts as a person.
+PERSON_SHARE = 1 / 3
+
+
+def vote(classes: Counter) -> str:
+    """An object's category from its per-frame detector classes."""
+    by_cat = Counter()
+    for cls, n in classes.items():
+        by_cat[CATEGORIES[cls]] += n
+    cat = by_cat.most_common(1)[0][0]
+    if cat == "animal" and by_cat["person"] >= PERSON_SHARE * sum(by_cat.values()):
+        return "person"
+    return cat
+
+
 @dataclass
 class Det:
     t: float
@@ -175,7 +193,7 @@ class Track:
 
     @staticmethod
     def category(dets: list[Det]) -> str:
-        return CATEGORIES[Counter(d.cls for d in dets).most_common(1)[0][0]]
+        return vote(Counter(d.cls for d in dets))
 
     def moving(self) -> bool:
         if len(self.history) < 2 or self.history[-1][0] - self.history[0][0] < MOVE_SPAN * 0.6:
@@ -262,8 +280,9 @@ def save_tube(paths: DayPaths, seg: list[Det], fps: float, context: list[Det] = 
     while (paths.tubes_out / name).exists():  # two objects can start in the same tenth of a second
         n += 1
         name = f"{seg[0].t:08.1f}_{cat}_{n}.pkl"
-    tube = {"t0": seg[0].t, "t1": seg[-1].t, "category": cat,
-            "cls": Counter(d.cls for d in seg).most_common(1)[0][0], "fps": fps, "frames": frames_out,
+    votes = Counter(d.cls for d in seg)
+    tube = {"t0": seg[0].t, "t1": seg[-1].t, "category": cat, "cls": votes.most_common(1)[0][0],
+            "votes": dict(votes), "fps": fps, "frames": frames_out,
             "context": [(*d.box, _png(d.crop)) for d in context]}
     with open(paths.tubes_out / name, "wb") as fh:
         pickle.dump(tube, fh, protocol=pickle.HIGHEST_PROTOCOL)

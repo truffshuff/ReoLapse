@@ -60,7 +60,9 @@ fp16 on MPS and are tracked with ByteTrack. A track becomes a *tube* only while 
 that stops for a few seconds ends its tube. That short-window test is fooled by a parked car whose box
 wobbles, so a vehicle tube is kept only if its centre gets at least 0.5 × its median box diagonal away
 from its (median-smoothed) start (`tube_index.really_moved`; people and animals aren't filtered, since
-those that barely travel were real). Rejected tubes are moved to `tubes/_pruned/` at the end of a scan,
+those that barely travel were real). A tube's category comes from its per-frame classes summed by category (`analyze.vote`), with one bias:
+an animal-majority track that is *person* in ≥ ⅓ of frames is a person (posed or cut-off people get
+called dog/bird, not the reverse); the per-frame votes are stored in the tube as `votes`. Rejected tubes are moved to `tubes/_pruned/` at the end of a scan,
 and `reolapse prune` applies the same check to days analyzed before it existed. Stationary objects a moving one came
 near (the parked car someone reaches into) are saved with it as *context*. For whole-day scans the
 background medians are built from the same decoded frames, so each recording is read once. A checkpoint

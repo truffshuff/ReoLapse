@@ -27,7 +27,13 @@ MODEL_CATALOG = [
     {"file": "yolo26s-seg.pt", "name": "YOLO26 small", "speed": "about 2x slower (~22 frames/s)",
      "about": "Finds more small or distant objects (far side of the street) and draws tighter outlines."},
     {"file": "yolo26m-seg.pt", "name": "YOLO26 medium", "speed": "about 4x slower",
-     "about": "Most accurate of the three; only worth it if small objects are being missed."},
+     "about": "Finds more small objects; not reliably better than nano at telling people from animals."},
+    {"file": "yolo26l-seg.pt", "name": "YOLO26 large", "speed": "about 5x slower",
+     "about": "Clearly better on hard cases: someone bent over, cut off by the edge of the picture or "
+              "washed out by night lighting is called a person, not a dog or a bird. Little slower than medium."},
+    {"file": "yolo26x-seg.pt", "name": "YOLO26 extra large", "speed": "about 10x slower",
+     "about": "The most accurate; a whole-day scan takes many hours, more so on Clear streams. "
+              "135 MB download on first use."},
     {"file": "yolo11n-seg.pt", "name": "YOLO11 nano", "speed": "fastest",
      "about": "Previous generation nano model; kept for comparison."},
 ]

@@ -169,7 +169,7 @@ better trade than switching to Clear.
 |---|---|
 | **Frame rate** | 5 fps is about twice as fast; 10 fps gives smoother motion and catches fast cars in more frames. |
 | **Where to look** | *Whole day* scans 24 hours and runs the detector only when pixels change; catches everything. *NVR events only* scans just the NVR's person/animal/motion windows; much faster, misses vehicles that never overlapped one. |
-| **Detection model** | *YOLO26 nano* (fastest, recommended), *small* (~2× slower, more distant objects), *medium* (~4× slower). |
+| **Detection model** | *YOLO26 nano* (fastest, recommended), *small* (~2× slower, more distant objects), *medium* (~4× slower), *large* (~5×; much better at telling an awkwardly posed or half-visible person from an animal), *extra large* (~10×, the most accurate). Larger models download on first use. |
 | **Detector size** | 960 fast; 1280 recommended; 1920 finds small/distant objects at about half the speed. |
 
 ### Rendering
@@ -215,6 +215,12 @@ little from frame to frame, which can look like movement for a moment, so a **ve
 travels at least half its own size** (a car driving in or out of view covers far more). People and
 animals aren't held to that: someone gardening or standing at the door barely travels but is real.
 An object that stops for a few seconds ends; it continues as a new one when it moves again.
+
+An object's type is decided from every frame it was seen in. The detector sometimes calls a person who
+is bent over, cut off by the edge of the picture or washed out by night lighting a dog or a bird, but
+rarely mistakes an animal for a person, so an "animal" that was a person in at least a third of its
+frames counts as a person. Bigger models make this mistake much less: in one such case nano said person
+in 12 of 25 frames, *large* in 22 and *extra large* in 24 (*medium* only 7).
 
 Objects that don't pass the check are set aside in the day's `tubes/_pruned` folder rather than deleted.
 Days analyzed with v0.1.2 or earlier still contain parked-car blips: either queue *Find moving objects*
