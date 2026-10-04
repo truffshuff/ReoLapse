@@ -22,7 +22,7 @@ never sends footage anywhere.
 | ![Player](docs/screenshots/player.jpg) | **Player**: watch the synopsis in *cutout*, *ghost* or *outline* style, with everything or just the **people**, **vehicles** or **animals**. Click the activity graph to jump to any time and see the **original footage** from that moment underneath. |
 | ![Find in area](docs/screenshots/find-in-area.jpg) | **Find in area**: draw boxes on the picture (the driveway, the front door…) and get every object that passed through, with a cutout and the time; click one to jump there. |
 | ![All cameras](docs/screenshots/all-cameras.jpg) | **All cameras**: every camera's real recording from the same second, played together. Pick an event detected on any camera and all of them jump to it, so you can follow someone from one view to the next. |
-| ![Insights](docs/screenshots/insights-trails.jpg) | **Insights**: every path of the day colored by time, a heatmap of where things moved, and a "group shot" of everyone who came by. |
+| ![Insights](docs/screenshots/insights-trails.jpg) | **Insights**: every path of the day colored by time, a heatmap of where things moved, and a "group shot" of everyone who came by; for everything or just people, vehicles or animals. |
 | ![Jobs](docs/screenshots/jobs.jpg) | **Jobs**: download, find objects and render, in two lanes that run side by side, with live progress, readable logs, reordering, retry, and pause/resume (automatic when the laptop leaves home). |
 | ![Settings](docs/screenshots/settings.jpg) | **Settings**: the NVR login (kept in the Keychain), which cameras and which stream (Fluent or Clear), analysis and rendering choices with an explanation for each, where files go, and **Check for updates**. |
 

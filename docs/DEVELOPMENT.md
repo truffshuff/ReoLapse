@@ -44,6 +44,7 @@ analyze  raw ──► bg/NNN.jpg                    median of the empty scene p
                ► tubes/_pruned/*.pkl           set aside: vehicles that never really travelled
 render   tubes+bg ► out/synopsis_<style>_<color>.mp4 (+ .json timing sidecar), trails.jpg, strobe.jpg, heatmap.jpg
                   ► out/synopsis_<style>_<color>_<type>.mp4   only person / vehicle / animal (optional)
+                  ► out/trails_<type>.jpg, strobe_<type>.jpg, heatmap_<type>.jpg   per-type stills
 ```
 
 **Download.** The RLN16 NVR only serves *whole recording files* (`cmd=Download` with the search
@@ -69,8 +70,10 @@ every 2 minutes of footage makes the scan resumable.
 by at most the allowed drift where that removes real overlap, and composited over cross-faded
 background medians; tags show each frame's real time. The timing sidecar lets the app map time of day
 to video time. *Only* renders (`--only person`, or `render.per_type` in Settings, which adds
-`--per-type` to app jobs) filter the tubes by category, size the video for that smaller set, and skip
-the stills.
+`--per-type` to app jobs) filter the tubes by category and size the video for that smaller set; an
+`--only` render writes that type's stills. A full render writes the whole-day stills plus one set per
+type present; `--no-video` (job option `no_video`) makes just the stills. `publish` copies only files
+whose size or mtime differ from the share's copy.
 
 ## Running from source
 

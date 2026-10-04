@@ -100,6 +100,12 @@ Each camera's clip starts at its nearest keyframe, so cameras can be up to about
 
   ![Group shot](screenshots/insights-group.jpg)
 
+**Show** picks *Everything* or just the **People**, **Vehicles** or **Animals**: the people's paths
+without the street traffic, or where the cars actually go. Every render makes these per-type pictures
+(about 15 seconds each per camera). For days rendered before they existed, choose a type and click
+**Make pictures for each type**: a pictures-only render for every camera of that day, about a minute per
+camera, with no videos re-rendered.
+
 ## Jobs
 
 ![Jobs](screenshots/jobs.jpg)

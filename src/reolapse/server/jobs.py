@@ -108,6 +108,8 @@ def pipeline_args(job: Job, cfg: dict) -> list[str]:
             args += ["--only", ",".join(only)]
         elif r.get("per_type"):
             args += ["--per-type", ",".join(r["per_type"])]
+        if job.options.get("no_video"):  # pictures only (Insights)
+            args.append("--no-video")
     return args
 
 
@@ -291,7 +293,8 @@ class JobQueue:
             self.jobs[job.id] = job
             when = date.fromisoformat(day).strftime("%a %b %-d")
             only = ", ".join(ONLY_NAME.get(o, o) for o in job.options.get("only", []))
-            self._write_log(job, f"Queued: {KIND_LABEL[k]}{f' ({only} only)' if only else ''} for {when}; "
+            note = ", ".join(x for x in (f"{only} only" if only else "", "pictures only" if job.options.get("no_video") else "") if x)
+            self._write_log(job, f"Queued: {KIND_LABEL[k]}{f' ({note})' if note else ''} for {when}; "
                                  f"cameras: {', '.join(job.cameras)}")
             created.append(job)
         self._save()

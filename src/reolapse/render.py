@@ -313,7 +313,15 @@ def _scale(canvas: np.ndarray) -> float:
     return canvas.shape[1] / 1920 * 0.55
 
 
-def render_trails(paths: DayPaths, tubes: list[Tube], bgs: Backgrounds) -> Path:
+def _still(paths: DayPaths, name: str, kind: str) -> tuple[Path, str]:
+    """Where a still goes (trails.jpg, or trails_person.jpg for one type) and its caption prefix."""
+    if not kind:
+        return paths.out / f"{name}.jpg", f"{paths.day:%a %b %-d}"
+    words = "+".join(CATEGORY_NAME.get(k, k) for k in kind.split("-"))
+    return paths.out / f"{name}_{kind}.jpg", f"{paths.day:%a %b %-d}  {words}:"
+
+
+def render_trails(paths: DayPaths, tubes: list[Tube], bgs: Backgrounds, kind: str = "") -> Path:
     canvas = (bgs.daylight() * 0.55).astype(np.uint8)
     for t in sorted(tubes, key=lambda t: t.t0):
         pts = np.array([((x0 + x1) / 2, y1) for x0, y0, x1, y1 in t.boxes], np.float32)
@@ -323,14 +331,14 @@ def render_trails(paths: DayPaths, tubes: list[Tube], bgs: Backgrounds) -> Path:
         col = time_bgr(t.t0)
         cv2.polylines(canvas, [pts.astype(np.int32)], False, col, 2, cv2.LINE_AA)
         cv2.circle(canvas, tuple(pts[0].astype(int)), 3, col, -1, cv2.LINE_AA)
-    chip(canvas, f"{paths.day:%a %b %-d}  {len(tubes)} paths", _scale(canvas))
+    dest, head = _still(paths, "trails", kind)
+    chip(canvas, f"{head}  {len(tubes)} paths", _scale(canvas))
     _legend(canvas)
-    dest = paths.out / "trails.jpg"
     cv2.imwrite(str(dest), canvas, [cv2.IMWRITE_JPEG_QUALITY, 92])
     return dest
 
 
-def render_strobe(paths: DayPaths, tubes: list[Tube], bgs: Backgrounds, max_overlap: float = 0.5) -> Path:
+def render_strobe(paths: DayPaths, tubes: list[Tube], bgs: Backgrounds, kind: str = "", max_overlap: float = 0.5) -> Path:
     """One snapshot per object (its middle frame), far objects first, skipping ones that
     would mostly hide something already placed -- a 'everyone who came by' group shot."""
     canvas = bgs.daylight()
@@ -364,13 +372,13 @@ def render_strobe(paths: DayPaths, tubes: list[Tube], bgs: Backgrounds, max_over
             continue
         taken.append(rect)
         label(canvas, clock(t.t0), x0, y0 - 2, CATEGORY_BGR[t.category], scale * 0.85)
-    chip(canvas, f"{paths.day:%a %b %-d}  {len(placed)} of {len(tubes)} (daylight)", scale)
-    dest = paths.out / "strobe.jpg"
+    dest, head = _still(paths, "strobe", kind)
+    chip(canvas, f"{head}  {len(placed)} of {len(tubes)} (daylight)", scale)
     cv2.imwrite(str(dest), canvas, [cv2.IMWRITE_JPEG_QUALITY, 92])
     return dest
 
 
-def render_heatmap(paths: DayPaths, tubes: list[Tube], bgs: Backgrounds) -> Path:
+def render_heatmap(paths: DayPaths, tubes: list[Tube], bgs: Backgrounds, kind: str = "") -> Path:
     """How many objects passed through each pixel (each object counts once, however long it stayed)."""
     base = bgs.daylight()
     H, W = base.shape[:2]
@@ -386,14 +394,14 @@ def render_heatmap(paths: DayPaths, tubes: list[Tube], bgs: Backgrounds) -> Path
             np.maximum(foot[y0:y0 + h, x0:x0 + w], a[:h, :w], out=foot[y0:y0 + h, x0:x0 + w])
         h, w = min(foot.shape[0], H - by0), min(foot.shape[1], W - bx0)
         heat[by0:by0 + h, bx0:bx0 + w] += foot[:h, :w] > 127
+    dest, head = _still(paths, "heatmap", kind)
     if heat.max() > 0:
         top = max(1.0, float(np.percentile(heat[heat > 0], 98)))
         norm = np.clip(heat / top, 0, 1)
         colored = cv2.applyColorMap((norm * 255).astype(np.uint8), cv2.COLORMAP_INFERNO)
         a = np.where(heat > 0, 0.25 + 0.6 * norm, 0)[:, :, None]
         base = (base * 0.6 * (1 - a) + colored * a).astype(np.uint8)
-        chip(base, f"{paths.day:%a %b %-d}  brightest = {int(top)}+ objects", _scale(base))
-    dest = paths.out / "heatmap.jpg"
+        chip(base, f"{head}  brightest = {int(top)}+ objects", _scale(base))
     cv2.imwrite(str(dest), base, [cv2.IMWRITE_JPEG_QUALITY, 92])
     return dest
 
@@ -406,10 +414,11 @@ def run(cameras, day, *, styles: list[str], color: str, length: float | None, de
         video: bool = True, drift_min: float = 10.0, per_type: list[str] = ()) -> None:
     """Render each camera's videos and stills.
 
-    only:     render just these object types (videos named ..._<types>); the day's stills are left alone,
-              since they describe the whole day.
+    only:     render just these object types (videos and stills named ..._<types>).
     per_type: after the full videos, also render one video per listed type, in the first style
               (fewer objects, so a shorter, cheaper render).
+    stills:   trails, group shot and heatmap; a full render also makes them for each type present
+              (each takes seconds), so Insights can show one type at a time.
     """
     for cam in cameras:
         paths = DayPaths(cam, day)
@@ -420,11 +429,14 @@ def run(cameras, day, *, styles: list[str], color: str, length: float | None, de
             print("   no moving objects found for this day yet; run the analysis first" if not all_tubes
                   else f"   no {', '.join(CATEGORY_NAME.get(o, o) for o in sorted(only))} on this camera this day")
             continue
-        stills = stills and not only
+        kinds = [k for k in CATEGORY_NAME if any(t.category == k for t in all_tubes)]
+        still_sets = ([("-".join(sorted(only)), tubes)] if only else
+                      [("", tubes)] + [(k, [t for t in all_tubes if t.category == k]) for k in kinds]) if stills else []
         extras = [k for k in per_type if not only and video and any(t.category == k for t in all_tubes)]
         what = f"{len(tubes)} objects" + (f" ({', '.join(CATEGORY_NAME.get(o, o) for o in sorted(only))} only)" if only else "")
         print(f"   {what}, {len(styles) if video else 0} video style(s)"
               + (", plus trails, group shot and heatmap stills" if stills else "")
+              + (f" (also for {', '.join(CATEGORY_NAME[k] for k in kinds)} separately)" if stills and not only and kinds else "")
               + (f", plus {', '.join(CATEGORY_NAME.get(k, k) + '-only' for k in extras)} video(s)" if extras else ""))
         bgs = Backgrounds(paths.backgrounds)
         suffix = f"_{'-'.join(sorted(only))}" if only else ""
@@ -438,10 +450,11 @@ def run(cameras, day, *, styles: list[str], color: str, length: float | None, de
             render_video(paths, subset, bgs, style=styles[0], color=color, length=length, density=density,
                          speed=speed, max_tube=max_tube, fps=fps, labels=labels,
                          tag=f"{styles[0]}_{color}_{kind}", drift_min=drift_min)
-        if stills:
+        if still_sets:
             paths.out.mkdir(parents=True, exist_ok=True)
+        for kind, subset in still_sets:
             for fn in (render_trails, render_strobe, render_heatmap):
-                print(f"   still image: {fn(paths, tubes, bgs).name}")
+                print(f"   still image: {fn(paths, subset, bgs, kind).name}")
         publish(paths)
 
 
@@ -450,8 +463,20 @@ def publish(paths: DayPaths) -> None:
     if paths.out.resolve() == paths.published.resolve() or not paths.out.exists():
         return
     paths.published.mkdir(parents=True, exist_ok=True)
-    files = sorted(paths.out.iterdir())
-    print(f"   copying {len(files)} finished files to the share ({paths.published})…")
+
+    def same(f: Path) -> bool:  # copy2 keeps mtimes, so an unchanged file matches exactly
+        d = paths.published / f.name
+        try:
+            a, b = f.stat(), d.stat()
+        except FileNotFoundError:
+            return False
+        return a.st_size == b.st_size and int(a.st_mtime) == int(b.st_mtime)
+
+    files = [f for f in sorted(paths.out.iterdir()) if f.is_file() and not same(f)]
+    if not files:
+        print("   the share is already up to date")
+        return
+    print(f"   copying {len(files)} new or changed files to the share ({paths.published})…")
     for f in files:
         shutil.copy2(f, paths.published / f.name)
     print("   done")

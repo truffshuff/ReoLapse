@@ -40,12 +40,25 @@ def test_per_type_extra_videos_and_filtered_render_keeps_stills(tmp_path, monkey
     assert "synopsis_cutout_category.mp4" in out and "synopsis_cutout_category_person.mp4" in out
     assert not any("animal" in n for n in out)
     assert {"trails.jpg", "strobe.jpg", "heatmap.jpg"} <= set(out)
+    assert {f"{s}_{k}.jpg" for s in ("trails", "strobe", "heatmap") for k in ("person", "vehicle")} <= set(out)
     trails_before = (paths.published / "trails.jpg").read_bytes()
 
     _render(only={"vehicle"})
     out = sorted(p.name for p in paths.published.iterdir())
     assert "synopsis_cutout_category_vehicle.mp4" in out
     assert (paths.published / "trails.jpg").read_bytes() == trails_before  # whole-day stills untouched
+
+
+def test_pictures_only_render(tmp_path, monkeypatch):
+    paths = _day(tmp_path, monkeypatch)
+    _render(video=False)
+    out = {p.name for p in paths.published.iterdir()}
+    assert not any(n.endswith(".mp4") for n in out)
+    assert {"trails.jpg", "trails_person.jpg", "heatmap_vehicle.jpg", "strobe_person.jpg"} <= out
+    assert not any("animal" in n for n in out)
+    monkeypatch.setattr(settings_mod, "SETTINGS_PATH", tmp_path / "settings.json")
+    args = pipeline_args(Job("render", "2026-10-01", ["Garage"], {"no_video": True}), settings_mod.load())
+    assert "--no-video" in args
 
 
 def test_job_args_for_type_videos(tmp_path, monkeypatch):

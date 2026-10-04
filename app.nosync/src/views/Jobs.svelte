@@ -1,7 +1,7 @@
 <script>
   import { onMount, tick } from 'svelte';
   import { api, onJobEvents } from '../lib/api.js';
-  import { yesterday, duration } from '../lib/format.js';
+  import { yesterday, duration, CAT_LABEL } from '../lib/format.js';
   import Switch from '../components/Switch.svelte';
   import InfoTip from '../components/InfoTip.svelte';
   import { jobState } from '../lib/busy.svelte.js';
@@ -130,6 +130,8 @@
           <button class="pick" onclick={() => select(j.id)} aria-label="Show log for job {j.id}">
             <div class="row">
               <span class="title">{TITLE[j.kind] ?? j.kind}</span>
+              {#if j.options?.only?.length}<span class="small dim">{j.options.only.map((k) => CAT_LABEL[k] ?? k).join(', ')} only</span>{/if}
+              {#if j.options?.no_video}<span class="small dim">pictures only</span>{/if}
               <span class="mono muted">{j.day}</span>
               {#if j.group}<span class="small dim">part of job {j.group}</span>{/if}
               <span class="badge {STATUS_CLS[j.status]} push">{j.status}</span>
