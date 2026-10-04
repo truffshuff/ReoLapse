@@ -87,6 +87,9 @@ class Job:
         return d
 
 
+_OS_NOISE = re.compile(r"\s*\S+\(\d+\) MallocStackLogging:[^\r\n]*")
+
+
 def pipeline_args(job: Job, cfg: dict) -> list[str]:
     """CLI arguments for a job: settings provide defaults, job.options override them."""
     args = [job.kind, "--day", job.day]
@@ -485,6 +488,11 @@ class JobQueue:
         self._schedule()
 
     def _segment(self, job: Job, text: str, end: str) -> None:
+        # macOS's allocator can print "python(1234) MallocStackLogging: can't turn off malloc stack
+        # logging…" when a helper process starts. Harmless; it can land in the middle of a status line.
+        text, noise = _OS_NOISE.subn("", text)
+        if noise:
+            end = "\r" if end == "\n" and text.strip() else end  # what's left is the status it interrupted
         text = text.rstrip()
         if not text:
             return

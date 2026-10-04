@@ -402,3 +402,15 @@ def test_saving_settings_keeps_a_login_saved_since(env, monkeypatch):
         assert out["nvr"]["host"] == "10.0.0.2" and out["nvr"]["user"] == "reolapse"
         assert out["render"]["drift"] == 3
         assert client.get("/api/nvr").json()["password_set"] is True
+
+
+def test_macos_malloc_noise_is_dropped(env):
+    q = JobQueue(fake_command)
+    job = Job("analyze", "2026-09-30", ["Garage"])
+    q._segment(job, "scanned up to 6:59 PM · 789 objects so far   python(7332) MallocStackLogging: "
+                    "can't turn off malloc stack logging because it was not enabled.", "\n")
+    assert job.status_line == "scanned up to 6:59 PM · 789 objects so far" and not job.log
+    q._segment(job, "python(7332) MallocStackLogging: can't turn off malloc stack logging", "\n")
+    assert not job.log
+    q._segment(job, "   footage: 32 recording files", "\n")
+    assert job.log[-1].endswith("footage: 32 recording files")
