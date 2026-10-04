@@ -110,3 +110,34 @@ def test_settings_are_recorded_for_the_app(tmp_path, monkeypatch):
     _render(stills=False)
     side = json.loads((paths.published / "synopsis_cutout_category.json").read_text())
     assert side["style"] == "cutout" and side["analysis"]["imgsz"] == 1920 and side["categories"] == ["person", "vehicle"]
+
+
+def test_resumed_job_keeps_cameras_it_finished(tmp_path, monkeypatch):
+    import time as _time
+    from reolapse.analyze import finished_since, write_analysis_info
+    from reolapse.media import Recording
+
+    paths = _day(tmp_path, monkeypatch)
+    settings = dict(fps=10.0, model="yolo26l-seg.pt", imgsz=1920, types={"all"}, hours=(0, 24))
+    queued = _time.time() - 60
+    assert not finished_since(paths, queued, **settings)  # nothing recorded yet
+    write_analysis_info(paths, [Recording(paths.raw / "main_1.mp4", 0, 3600, 5120, 1552)], **settings)
+    assert finished_since(paths, queued, **settings)  # finished by this job: skip on resume
+    assert not finished_since(paths, _time.time() + 60, **settings)  # a newer job re-analyzes
+    assert not finished_since(paths, queued, **{**settings, "model": "yolo26x-seg.pt"})  # other settings
+    assert not finished_since(paths, None, **settings)  # the CLI without --done-since
+    args = pipeline_args(Job("analyze", "2026-10-01", ["Garage"], created=queued), settings_mod.load())
+    assert args[args.index("--done-since") + 1] == f"{queued:.0f}"
+
+
+def test_resumed_job_keeps_cameras_finished_by_older_versions(tmp_path, monkeypatch):
+    import time as _time
+    from reolapse.analyze import CHECKPOINT, finished_since
+
+    paths = _day(tmp_path, monkeypatch)
+    settings = dict(fps=10.0, model="yolo26l-seg.pt", imgsz=1920, types={"all"}, hours=(0, 24))
+    queued = _time.time() - 60
+    (paths.tubes_out / "index.json").write_text('{"width":2560,"height":776,"tubes":[]}')
+    assert finished_since(paths, queued, **settings)
+    (paths.tubes_out / CHECKPOINT).write_text("{}")  # still in progress
+    assert not finished_since(paths, queued, **settings)

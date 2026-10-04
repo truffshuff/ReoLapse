@@ -526,16 +526,39 @@ def write_analysis_info(paths: DayPaths, recs: list[Recording], **settings) -> N
     info = {"stream": stream_of(r.path.name for r in recs), "source_size": [recs[0].width, recs[0].height],
             "size": list(recs[0].size), **settings, "types": sorted(settings.get("types", [])),
             "hours": list(settings.get("hours", (0, 24))),
-            "finished": datetime.now().isoformat(timespec="seconds"), "app": os.environ.get("REOLAPSE_APP_VERSION")}
+            "finished": datetime.now().isoformat(timespec="seconds"), "finished_ts": time.time(),
+            "app": os.environ.get("REOLAPSE_APP_VERSION")}
     (paths.tubes_out / ANALYSIS_INFO).write_text(json.dumps(info, indent=1))
 
 
+def finished_since(paths: DayPaths, since: float | None, **settings) -> bool:
+    """Was this camera-day analyzed to the end, with these settings, after `since`? A job resumed after
+    a pause must not redo (and so delete) a camera it already finished."""
+    if since is None:
+        return False
+    try:
+        info = json.loads((paths.tubes_out / ANALYSIS_INFO).read_text())
+    except (OSError, ValueError):
+        # Finished by a version that didn't write analysis.json: a complete index (written at the end)
+        # with no checkpoint (removed at the end) from after the job was queued.
+        index = paths.tubes_out / tube_index.INDEX_NAME
+        return (index.exists() and not (paths.tubes_out / CHECKPOINT).exists()
+                and index.stat().st_mtime >= since)
+    same = (info.get("fps") == settings["fps"] and info.get("model") == settings["model"]
+            and info.get("imgsz") == settings["imgsz"] and info.get("types") == sorted(settings["types"])
+            and info.get("hours") == list(settings["hours"]))
+    return same and info.get("finished_ts", 0) >= since
+
+
 def run(cameras: list[str], day, *, fps: float, model: str, imgsz: int, types: set[str], skip_bg: bool,
-        hours: tuple[float, float] = (0, 24)) -> None:
+        hours: tuple[float, float] = (0, 24), done_since: float | None = None) -> None:
     for cam in cameras:
         paths = DayPaths(cam, day)
         cam_t0 = time.monotonic()
         print(f"== {cam}: finding moving objects on {day}")
+        if finished_since(paths, done_since, fps=fps, model=model, imgsz=imgsz, types=types, hours=hours):
+            print("   already finished earlier in this job with the same settings; keeping those results")
+            continue
         recs = load_recordings(paths)
         w, h = recs[0].size
         how = (f"Clear stream scaled to {w}×{h} on the hardware decoder" if recs[0].big

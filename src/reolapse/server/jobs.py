@@ -102,6 +102,8 @@ def pipeline_args(job: Job, cfg: dict) -> list[str]:
                  "--imgsz", str(a["imgsz"])]
         if job.options.get("skip_bg"):
             args.append("--skip-bg")
+        if job.created:  # resumed after a pause: keep cameras this job already finished
+            args += ["--done-since", f"{job.created:.0f}"]
     if job.kind in ("render", "run"):
         styles = r["styles"] if isinstance(r["styles"], list) else [r["styles"]]
         args += ["--style", ",".join(styles), "--color", str(r["color"]), "--drift", str(r["drift"]),
