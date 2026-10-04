@@ -363,6 +363,9 @@ def create_app(queue: JobQueue | None = None, updater=None) -> FastAPI:
 
     @app.put("/api/settings")
     def put_settings(patch: dict):
+        # The NVR login is saved only through PUT /api/nvr: the Settings page sends its whole form
+        # here, and its copy of the login can be older than one saved a moment ago with Save login.
+        patch = {k: v for k, v in patch.items() if k != "nvr"}
         try:
             saved = settings_mod.save(patch)
         except ValueError as e:

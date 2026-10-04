@@ -386,3 +386,19 @@ def test_remove_finished_jobs(env):
         assert client.delete("/api/jobs").json() == {"removed": [b["id"]]}
         assert client.get("/api/jobs").json() == []
         assert client.delete("/api/jobs/99").status_code == 404
+
+
+def test_saving_settings_keeps_a_login_saved_since(env, monkeypatch):
+    import keyring
+    store = {}
+    monkeypatch.setattr(keyring, "set_password", lambda s, a, p: store.__setitem__((s, a), p))
+    monkeypatch.setattr(keyring, "get_password", lambda s, a: store.get((s, a)))
+    with TestClient(create_app(JobQueue(fake_command))) as client:
+        page = client.get("/api/settings").json()  # the Settings page opens: no login yet
+        assert client.put("/api/nvr", json={"host": "10.0.0.2", "user": "reolapse", "port": 80,
+                                            "password": "secret"}).status_code == 200
+        page["render"]["drift"] = 3
+        out = client.put("/api/settings", json=page).json()  # Save changes with the page's old copy
+        assert out["nvr"]["host"] == "10.0.0.2" and out["nvr"]["user"] == "reolapse"
+        assert out["render"]["drift"] == 3
+        assert client.get("/api/nvr").json()["password_set"] is True

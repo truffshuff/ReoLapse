@@ -70,6 +70,10 @@
     try {
       nvr = await api.saveNvr($state.snapshot(login));
       setLoginFrom(nvr);
+      // keep the form's copy in step, so it isn't "unsaved" and can't hold an older login
+      const n = { host: nvr.host ?? '', user: nvr.user ?? '', port: nvr.port ?? 80 };
+      s.nvr = { ...n };
+      if (saved) saved.nvr = { ...n };
       loginMsg = 'Saved. The password is kept in the system keychain.';
     } catch (e) {
       loginMsg = 'Not saved: ' + e.message;
@@ -126,7 +130,8 @@
   async function save() {
     message = '';
     try {
-      const out = await api.saveSettings($state.snapshot(s));
+      const { nvr: _login, ...patch } = $state.snapshot(s); // the login is saved by Save login
+      const out = await api.saveSettings(patch);
       s = out;
       saved = structuredClone(out);
       health = await api.health();
