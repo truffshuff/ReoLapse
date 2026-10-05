@@ -130,7 +130,9 @@ Animals) to add just that video to an already rendered day, in a few minutes.
 
 So the next day can download while an earlier day is being analyzed. A day's steps always run in order:
 its analysis waits for its download, its render for its analysis. A waiting job says why
-("waits for this day's download (job 4)").
+("waits for this day's download (job 4)"), also while the queue is paused. A *failed* step holds the
+day's later steps until it's retried; a *cancelled* one doesn't (e.g. cancel the Download of an
+*Everything* job when the footage is already on the share).
 
 - **Model · detector size · frame rate** (for *Find moving objects* and *Everything*): start from
   Settings → Analysis and apply to that job only, e.g. to try a faster detector size on one day. A job

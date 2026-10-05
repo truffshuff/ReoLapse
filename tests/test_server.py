@@ -447,3 +447,26 @@ def test_jobs_from_older_versions_get_their_settings_fixed_on_restart(env):
     q2 = JobQueue(fake_command)
     q2._restore()
     assert q2.jobs[job.id].options["imgsz"] == 1920 and q2.jobs[job.id].status == "queued"
+
+
+def test_cancelled_download_does_not_block_and_paused_queue_says_why(env):
+    import asyncio
+
+    async def scenario():
+        q = JobQueue(sleepy_command)
+        q.start()
+        q.pause("you paused it")
+        (old,) = q.submit("fetch", "2026-10-01", ["Porch Left"])
+        old.status = "done"  # footage already downloaded earlier
+        fetch, analyze, render = q.submit("run", "2026-10-01", ["Porch Left"])
+        (failed,) = q.submit("fetch", "2026-10-02", ["Garage"])
+        (later,) = q.submit("analyze", "2026-10-02", ["Garage"])
+        failed.status = "failed"
+        q.cancel(fetch.id)  # not needed: the footage is on the share
+        q._schedule()
+        assert analyze.waiting == "queue paused: you paused it"
+        assert later.waiting.startswith("queue paused: you paused it; then this day's download failed")
+        q.resume()
+        await _until(lambda: analyze.status == "done")
+
+    asyncio.run(scenario())

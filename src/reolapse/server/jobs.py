@@ -402,9 +402,12 @@ class JobQueue:
         for o in sorted(earlier, key=lambda o: o.order):
             if o.status in ("queued", "running"):
                 return f"waits for this day's {STEP_NAME[o.kind]} (job {o.id})"
+        # A cancelled step doesn't hold anything up: cancelling says "not needed" (e.g. the Download
+        # of an Everything job for footage that's already on the share). A failed one does, until retried.
         for stage in sorted({STAGE[o.kind] for o in earlier}):
-            latest = max((o for o in earlier if STAGE[o.kind] == stage), key=lambda o: o.id)
-            if latest.status in ("failed", "cancelled"):
+            latest = max((o for o in earlier if STAGE[o.kind] == stage and o.status != "cancelled"),
+                         key=lambda o: o.id, default=None)
+            if latest is not None and latest.status == "failed":
                 return f"this day's {STEP_NAME[latest.kind]} {latest.status} (job {latest.id}); retry it to continue"
         return ""
 
@@ -415,7 +418,8 @@ class JobQueue:
         to_start = []
         for job in queued:
             if self.paused:
-                reason = f"queue paused: {self.pause_reason}"
+                blocked = self._blocker(job)  # say it now, or it looks as if the order is ignored on resume
+                reason = f"queue paused: {self.pause_reason}" + (f"; then {blocked}" if blocked else "")
                 if reason != job.waiting:
                     job.waiting = reason
                     self._publish(job)
