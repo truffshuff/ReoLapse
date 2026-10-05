@@ -346,6 +346,19 @@ def _resume_point(paths: DayPaths, key: dict) -> dict | None:
     return ck if ck.get("key") == key else None
 
 
+def _release_gpu_cache() -> None:
+    """Hand PyTorch's cached GPU memory back to macOS (GPU memory is the Mac's RAM). Called at each
+    checkpoint: a day-long scan's cache can otherwise creep up until the Mac swaps, which slowed a
+    Porch Left scan to a third of its speed with the process at 14 GB."""
+    try:
+        import torch
+
+        if torch.backends.mps.is_available():
+            torch.mps.empty_cache()
+    except Exception:
+        pass
+
+
 def _no_nms_time_limit() -> None:
     """Turn off Ultralytics' NMS time limit (2 s + 0.05 s per image).
 
@@ -401,6 +414,7 @@ def detect_tubes(paths: DayPaths, recs: list[Recording], windows, fps: float, mo
         tmp = paths.tubes_out / (CHECKPOINT + ".tmp")
         tmp.write_text(json.dumps({"key": key, "t": t, "metas": metas}, separators=(",", ":")))
         tmp.replace(paths.tubes_out / CHECKPOINT)
+        _release_gpu_cache()
 
     _no_nms_time_limit()
     model = YOLO(str(MODEL_DIR / model_name))

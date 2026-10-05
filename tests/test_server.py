@@ -414,3 +414,36 @@ def test_macos_malloc_noise_is_dropped(env):
     assert not job.log
     q._segment(job, "   footage: 32 recording files", "\n")
     assert job.log[-1].endswith("footage: 32 recording files")
+
+
+def test_analysis_settings_are_fixed_when_queued(env):
+    from reolapse import settings as settings_mod
+
+    settings_mod.save({"analysis": {"model": "yolo26l-seg.pt", "imgsz": 1920, "fps": 10.0}})
+    q = JobQueue(fake_command)
+    q.paused = True  # nothing starts: only the queued arguments matter here
+    fetch, analyze, render = q.submit("run", "2026-09-29", ["Garage"])
+    test = q.submit("analyze", "2026-10-01", ["Porch Left"], {"imgsz": 1280})[0]
+    settings_mod.save({"analysis": {"imgsz": 960, "model": "yolo26n-seg.pt"}})  # changed later
+    cfg = settings_mod.load()
+    args = pipeline_args(analyze, cfg)
+    assert args[args.index("--imgsz") + 1] == "1920" and args[args.index("--model") + 1] == "yolo26l-seg.pt"
+    args = pipeline_args(test, cfg)
+    assert args[args.index("--imgsz") + 1] == "1280" and args[args.index("--model") + 1] == "yolo26l-seg.pt"
+    assert "imgsz" not in fetch.options and "imgsz" not in render.options
+
+
+def test_jobs_from_older_versions_get_their_settings_fixed_on_restart(env):
+    from reolapse import settings as settings_mod
+
+    settings_mod.save({"analysis": {"model": "yolo26l-seg.pt", "imgsz": 1920}})
+    q = JobQueue(fake_command)
+    q.paused = True
+    job = q.submit("analyze", "2026-09-29", ["Garage"])[0]
+    for k in ("fps", "types", "model", "imgsz"):
+        del job.options[k]  # as saved by an older version
+    job.status = "running"
+    q._save()
+    q2 = JobQueue(fake_command)
+    q2._restore()
+    assert q2.jobs[job.id].options["imgsz"] == 1920 and q2.jobs[job.id].status == "queued"

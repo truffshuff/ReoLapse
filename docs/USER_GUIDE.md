@@ -132,6 +132,10 @@ So the next day can download while an earlier day is being analyzed. A day's ste
 its analysis waits for its download, its render for its analysis. A waiting job says why
 ("waits for this day's download (job 4)").
 
+- **Model · detector size · frame rate** (for *Find moving objects* and *Everything*): start from
+  Settings → Analysis and apply to that job only, e.g. to try a faster detector size on one day. A job
+  keeps the settings it was queued with even if Settings change while it waits or is paused, so its
+  saved progress stays usable; the job card shows them.
 - **Up next**: ↑ ↓ reorder queued jobs (also while the queue is paused: pause, move a job to the top,
   resume, and it runs next); **Cancel** removes one.
 - **Finished**: **Retry** re-queues a failed or cancelled job. Work already done is skipped (finished

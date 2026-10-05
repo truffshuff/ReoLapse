@@ -90,6 +90,21 @@ class Job:
 _OS_NOISE = re.compile(r"\s*\S+\(\d+\) MallocStackLogging:[^\r\n]*")
 
 
+ANALYSIS_KEYS = ("fps", "types", "model", "imgsz")
+
+
+def pin_analysis(job: Job, cfg: dict) -> bool:
+    """Fix a Find moving objects job's settings when it's queued: changing Settings later must not
+    change a queued or paused job (a different model or size restarts its scan and discards the
+    progress, and makes it redo cameras it already finished). Returns True if anything was added."""
+    if job.kind != "analyze":
+        return False
+    added = [k for k in ANALYSIS_KEYS if k not in job.options]
+    for k in added:
+        job.options[k] = cfg["analysis"][k]
+    return bool(added)
+
+
 def pipeline_args(job: Job, cfg: dict) -> list[str]:
     """CLI arguments for a job: settings provide defaults, job.options override them."""
     args = [job.kind, "--day", job.day]
@@ -191,6 +206,10 @@ class JobQueue:
         for d in saved:
             job = Job(**{k: d[k] for k in Job.FIELDS if k in d})
             job.order = job.order or float(job.id)
+            if job.status in ("queued", "running") and pin_analysis(job, settings_mod.load()):
+                # queued by an older version: keep the settings it was running with (Settings now)
+                self._write_log(job, "Analysis settings fixed for this job: " + ", ".join(
+                    f"{k} {job.options[k]}" for k in ANALYSIS_KEYS))
             if job.status == "running":  # the server stopped mid-job: pick it up again
                 job.status = "queued"
                 self._write_log(job, "--- The server restarted while this job was running; resuming. "
@@ -291,7 +310,8 @@ class JobQueue:
         last = max((j.order for j in self.jobs.values()), default=0.0)
         created = []
         for k in kinds:
-            job = Job(k, day, list(cameras), options or {}, id=self._next_id, order=last + 1 + len(created))
+            job = Job(k, day, list(cameras), dict(options or {}), id=self._next_id, order=last + 1 + len(created))
+            pin_analysis(job, settings_mod.load())
             self._next_id += 1
             if len(kinds) > 1:
                 job.group = created[0].id if created else job.id
