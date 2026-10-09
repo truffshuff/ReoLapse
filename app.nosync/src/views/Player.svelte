@@ -8,6 +8,8 @@
   import RegionOverlay from '../components/RegionOverlay.svelte';
   import VideoState from '../components/VideoState.svelte';
   import SourceInfo from '../components/SourceInfo.svelte';
+  import ZoomControls from '../components/ZoomControls.svelte';
+  import { Zoom, zoomable, viewBox } from '../lib/zoom.svelte.js';
   import { jobState } from '../lib/busy.svelte.js';
 
   let { params } = $props();
@@ -19,6 +21,8 @@
   let info = $state(null);
   let videoName = $state('');
   let synVideo = $state();
+  const synZoom = new Zoom();
+  const origZoom = new Zoom();
   let meta = $state(null); // the video's sidecar: timing and the settings it was made with
   let length = $state(0); // synopsis seconds that span the 24 h day (from the render's sidecar)
   let synTime = $state(0);
@@ -100,7 +104,18 @@
       if (show === request.only) choose(current?.style ?? 'cutout', show);
     }
   }
-  const dayT = $derived(length ? Math.min(86399, (synTime / length) * 86400) : null);
+  // Video time <-> time of day: a straight line for an even clock, the render's knots for an adaptive one.
+  function interp(x, xs, ys) {
+    if (x <= xs[0]) return ys[0];
+    let lo = 0, hi = xs.length - 1;
+    if (x >= xs[hi]) return ys[hi];
+    while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (xs[mid] <= x) lo = mid; else hi = mid; }
+    return ys[lo] + ((ys[hi] - ys[lo]) * (x - xs[lo])) / (xs[hi] - xs[lo] || 1);
+  }
+  const knots = $derived(meta?.map ? { day: meta.map.map((k) => k[0]), video: meta.map.map((k) => k[1]) } : null);
+  const toDay = (v) => (knots ? interp(v, knots.video, knots.day) : (v / length) * 86400);
+  const toVideo = (d) => (knots ? interp(d, knots.day, knots.video) : (d / 86400) * length);
+  const dayT = $derived(length ? Math.min(86399, toDay(synTime)) : null);
 
   onMount(() => onJobEvents({ job: (e) => onJob(e.job) }));
 
@@ -125,6 +140,8 @@
       originalSrc = '';
       originalT = null;
       show = 'all';
+      synZoom.reset();
+      origZoom.reset();
       regions = [];
       found = null;
     });
@@ -191,7 +208,7 @@
   function jumpTo(t) {
     t = Math.max(0, Math.min(86399, t));
     if (synVideo && length) {
-      synVideo.currentTime = (t / 86400) * length;
+      synVideo.currentTime = toVideo(t);
       synVideo.play().catch(() => {});
     }
     showOriginal(t);
@@ -221,14 +238,16 @@
     </div>
   </header>
 
-  <section class="stage">
+  <section class="stage" {@attach zoomable(synZoom, () => !drawing)}>
     {#if videoName}
       <!-- svelte-ignore a11y_media_has_caption -->
       <video bind:this={synVideo} src={media.out(day, camera, videoName)} controls autoplay muted
+             style:object-view-box={viewBox(synZoom)} style:cursor={synZoom.z > 1 && !drawing ? 'grab' : null}
              onloadedmetadata={onMeta} ontimeupdate={() => (synTime = synVideo.currentTime)} onseeked={() => (synTime = synVideo.currentTime)}
              onloadeddata={() => (synState = 'ready')} onerror={() => (synState = 'error')}></video>
       <VideoState status={synState} busy={jobState.downloading} />
-      <RegionOverlay bind:regions {drawing} />
+      <RegionOverlay bind:regions {drawing} view={synZoom.view} />
+      <ZoomControls zoom={synZoom} />
     {:else if !loaded || (camera && !info)}
       <div class="empty">Loading…</div>
     {:else}
@@ -361,8 +380,10 @@
       </div>
       {#if originalSrc}
         <!-- svelte-ignore a11y_media_has_caption -->
-        <div class="orig-wrap">
-          <video src={originalSrc} controls autoplay onloadeddata={() => (origState = 'ready')} onerror={() => (origState = 'error')}></video>
+        <div class="orig-wrap" {@attach zoomable(origZoom)}>
+          <video src={originalSrc} controls autoplay style:object-view-box={viewBox(origZoom)}
+                 style:cursor={origZoom.z > 1 ? 'grab' : null} onloadeddata={() => (origState = 'ready')} onerror={() => (origState = 'error')}></video>
+          <ZoomControls zoom={origZoom} />
           <VideoState status={origState} busy={jobState.downloading} />
         </div>
       {/if}

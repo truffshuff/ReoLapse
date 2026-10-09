@@ -34,6 +34,7 @@
     color: 'Type colors the time tags orange for people, blue for vehicles and green for animals. Time of day colors them by when the object was there, from blue at night through yellow at midday to teal in the evening.',
     drift: 'To reduce overlap, an object may be shown up to this many minutes away from its real time. 0 keeps every object at its exact time. The tag on each object always shows its real time.',
     speed: 'How fast objects move compared with real life. 2× keeps walking looking natural while fitting more into the video.',
+    clock: 'Adaptive gives busy times of day more of the video and quiet ones (the night) less, so where things happen the clock runs closer to the objects\' own pace: an object\'s time tag and the clock stay closer together, and empty hours pass quickly. Off, the clock runs at one rate all day, so every hour gets the same share of the video. Applies to videos rendered after the change.',
     density: 'Sets the automatic video length: roughly how many objects are on screen at once. Higher makes a shorter, busier video.',
     raw: 'Downloaded recordings are the biggest files (about 5–21 GB per camera per day). Days older than this would be deleted; the finished videos and stills are kept separately.',
     results: 'How long finished videos, stills and the object data behind them are kept.',
@@ -285,11 +286,16 @@
         </div>
         <div class="field">
           <div class="lab"><label for="speed">Object speed</label><InfoTip text={HELP.speed} /><span class="val mono">{s.render.speed}×</span></div>
-          <input id="speed" type="range" min="1" max="4" step="0.5" bind:value={s.render.speed} />
+          <input id="speed" type="range" min="1" max="8" step="0.5" bind:value={s.render.speed} />
         </div>
         <div class="field">
           <div class="lab"><label for="density">Objects on screen</label><InfoTip text={HELP.density} /><span class="val mono">~{s.render.density}</span></div>
           <input id="density" type="range" min="2" max="15" step="1" bind:value={s.render.density} />
+        </div>
+        <div class="field">
+          <div class="lab"><span>Clock</span><InfoTip text={HELP.clock} /></div>
+          <Switch label="Adaptive: busy times get more of the video" checked={s.render.clock === 'adaptive'}
+                  onchange={(on) => (s.render.clock = on ? 'adaptive' : 'even')} />
         </div>
       </section>
 

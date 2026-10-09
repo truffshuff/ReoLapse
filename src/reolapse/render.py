@@ -126,22 +126,69 @@ class Backgrounds:
         return self._img(min(self.keys, key=lambda k: abs(k - target))).copy()
 
 
+# ---------------------------------------------------------------- the clock
+
+class TimeMap:
+    """Time of day <-> video time, as a piecewise-linear curve through 5-minute knots.
+
+    even:     every 5 minutes of the day get the same video time (the clock runs at a constant rate).
+    adaptive: each 5 minutes get video time in proportion to the objects in it, plus a floor so quiet
+              hours still pass on screen. Where it's busy the clock slows to near the objects' own
+              pace, so an object's tag and the clock stay close (with an even clock a 30 s walk at 2x
+              spans ~45 min of an 8-minute video's clock); the empty night goes by quickly.
+    """
+
+    STEP = 300.0
+    QUIET_SHARE = 0.15  # of the video spread evenly over the day, whatever happens
+
+    def __init__(self, day: np.ndarray, video: np.ndarray, mode: str):
+        self.day, self.video, self.mode = day, video, mode
+
+    @classmethod
+    def even(cls, length: float) -> "TimeMap":
+        day = np.arange(0, 86400 + cls.STEP, cls.STEP)
+        return cls(day, day / 86400 * length, "even")
+
+    @classmethod
+    def adaptive(cls, tubes: list["Tube"], length: float) -> "TimeMap":
+        n = int(86400 / cls.STEP)
+        w = np.zeros(n)
+        for t in tubes:
+            w[min(n - 1, int(t.t0 // cls.STEP))] += t.out_duration
+        if not w.sum():
+            return cls.even(length)
+        w = np.convolve(w, [0.25, 0.5, 0.25], mode="same")  # objects spill into the next 5 minutes
+        per = cls.QUIET_SHARE * length / n + (1 - cls.QUIET_SHARE) * length * w / w.sum()
+        return cls(np.arange(n + 1) * cls.STEP, np.concatenate([[0.0], np.cumsum(per)]), "adaptive")
+
+    def to_video(self, day_t: float) -> float:
+        return float(np.interp(day_t, self.day, self.video))
+
+    def to_day(self, video_t: float) -> float:
+        return float(np.interp(video_t, self.video, self.day))
+
+    def knots(self) -> list[list[float]]:
+        return [[round(float(d), 1), round(float(v), 3)] for d, v in zip(self.day, self.video)]
+
+
 # ---------------------------------------------------------------- placement
 
-def place(tubes: list[Tube], length: float, shape, jitter: float) -> float:
+def place(tubes: list[Tube], tmap: TimeMap, shape, drift_s: float) -> float:
     """Assign each tube an output start near its time-of-day position, avoiding overlaps.
 
-    Longest tubes are placed first; each candidate start within ±jitter of the ideal
-    position is scored by how many occupied grid cells it would collide with.
-    Returns the actual video length.
+    Longest tubes are placed first; each candidate start between the video times of
+    (its time - drift) and (its time + drift) is scored by how many occupied grid cells it
+    would collide with. Returns the actual video length.
     """
+    length = float(tmap.video[-1])
     H, W = shape[:2]
     cw, ch = W / GRID_X, H / GRID_Y
     max_d = max((t.out_duration for t in tubes), default=0)
-    nbins = int((length + jitter + max_d) / BIN) + 2
+    windows = {id(t): (tmap.to_video(t.t0), tmap.to_video(max(0.0, t.t0 - drift_s)),
+                       tmap.to_video(min(86400.0, t.t0 + drift_s))) for t in tubes}
+    slack = max((hi - ideal for ideal, _, hi in windows.values()), default=0.0)
+    nbins = int((length + slack + max_d) / BIN) + 2
     occ = np.zeros((nbins, GRID_Y, GRID_X), np.int16)
-    k = max(0, int(jitter / BIN))
-    steps = np.arange(-k, k + 1) * BIN  # always includes 0 (the true time)
 
     for t in sorted(tubes, key=lambda t: -t.out_duration):
         n = int(t.out_duration / BIN) + 1
@@ -150,15 +197,18 @@ def place(tubes: list[Tube], length: float, shape, jitter: float) -> float:
             b = min(n - 1, int((tt - t.t0) / t.speed / BIN))
             fp[b, int(y0 / ch):int(y1 / ch) + 1, int(x0 / cw):int(x1 / cw) + 1] = True
         area = max(1, int(fp.sum()))
-        ideal = t.t0 / 86400.0 * length
+        ideal, lo, hi = windows[id(t)]
+        reach = max(ideal - lo, hi - ideal, BIN)
+        # candidate starts every BIN across the allowed window, and always the true time itself
+        candidates = np.append(ideal + np.arange(-int((ideal - lo) / BIN), int((hi - ideal) / BIN) + 1) * BIN, ideal)
         best, best_cost = ideal, None
-        for s in ideal + steps:
-            if s < 0 or s + t.out_duration > length + jitter:
+        for s in candidates:
+            if s < 0 or s + t.out_duration > length + slack:
                 continue
             b0 = int(s / BIN)
             # overlap (in units of this object's own footprint), plus a penalty for drifting from its true
             # time: sliding the full allowance only pays off if it removes half a footprint of overlap
-            cost = occ[b0:b0 + n][fp].sum() / area + 0.5 * abs(s - ideal) / max(jitter, BIN)
+            cost = occ[b0:b0 + n][fp].sum() / area + 0.5 * abs(s - ideal) / reach
             if best_cost is None or cost < best_cost:
                 best, best_cost = s, cost
         t.start = max(0.0, best)
@@ -225,15 +275,15 @@ def hud(canvas: np.ndarray, day_t: float, day_label: str, density: np.ndarray, s
 
 def render_video(paths: DayPaths, tubes: list[Tube], bgs: Backgrounds, *, style: str, color: str, length: float | None,
                  density: float, speed: float, max_tube: float, fps: float, labels: bool, tag: str,
-                 drift_min: float = 10.0) -> Path:
+                 drift_min: float = 10.0, clock_mode: str = "even") -> Path:
     H, W = bgs.shape[:2]
     for t in tubes:
         real = t.t1 - t.t0
         t.speed = max(speed, real / max_tube)  # very long tubes play faster so they don't dominate
     if length is None:
         length = float(np.clip(sum(t.out_duration for t in tubes) / density, 60, 900))
-    jitter = length * drift_min * 60 / 86400.0  # max shift, as output seconds
-    total = place(tubes, length, (H, W), jitter)
+    tmap = TimeMap.adaptive(tubes, length) if clock_mode == "adaptive" else TimeMap.even(length)
+    total = place(tubes, tmap, (H, W), drift_min * 60)
     hist = np.histogram([t.t0 for t in tubes], bins=96, range=(0, 86400))[0].astype(float)
     hist = hist / hist.max() if hist.max() else hist
 
@@ -260,7 +310,7 @@ def render_video(paths: DayPaths, tubes: list[Tube], bgs: Backgrounds, *, style:
             active.append(order[nxt])
             nxt += 1
         active = [t for t in active if t.start + t.out_duration >= tau]
-        day_t = min(86399.0, tau / length * 86400.0)
+        day_t = min(86399.0, tmap.to_day(tau))
         canvas = bgs.at(day_t)
         shown = []
         visible = [(t, t.frame_at(tau)) for t in sorted(active, key=lambda t: t.t0)]  # older objects underneath
@@ -289,7 +339,8 @@ def render_video(paths: DayPaths, tubes: list[Tube], bgs: Backgrounds, *, style:
             emit("render", k / max(nframes, 1), paths.camera, f"{style} video")
     enc.stdin.close()
     enc.wait()
-    # Sidecar for the app: maps time of day <-> video time (day_t = video_t / length * 86400).
+    # Sidecar for the app: maps time of day <-> video time (even clock: day_t = video_t / length * 86400;
+    # adaptive: through the "map" knots [[day_t, video_t], ...]).
     try:  # how the objects were found (recorded since v0.1.12)
         analysis = json.loads((paths.tubes / "analysis.json").read_text())
     except (OSError, ValueError):
@@ -297,6 +348,7 @@ def render_video(paths: DayPaths, tubes: list[Tube], bgs: Backgrounds, *, style:
     dest.with_suffix(".json").write_text(json.dumps(
         {"length": length, "duration": total, "fps": fps, "speed": speed, "drift_min": drift_min, "tubes": len(tubes),
          "style": style, "color": color, "density": density, "max_tube": max_tube, "labels": labels,
+         "clock": tmap.mode, "map": tmap.knots() if tmap.mode != "even" else None,
          "categories": sorted({t.category for t in tubes}),
          "rendered": time.strftime("%Y-%m-%dT%H:%M:%S"), "analysis": analysis}))
     print(f"\r   {style_name} video done in {dur(time.monotonic() - t_start)}: {dest.name}" + " " * 30)
@@ -418,7 +470,7 @@ CATEGORY_NAME = {"person": "people", "vehicle": "vehicles", "animal": "animals"}
 
 def run(cameras, day, *, styles: list[str], color: str, length: float | None, density: float, speed: float,
         max_tube: float, fps: float, labels: bool, only: set[str] | None, stills: bool,
-        video: bool = True, drift_min: float = 10.0, per_type: list[str] = ()) -> None:
+        video: bool = True, drift_min: float = 10.0, per_type: list[str] = (), clock_mode: str = "even") -> None:
     """Render each camera's videos and stills.
 
     only:     render just these object types (videos and stills named ..._<types>).
@@ -450,13 +502,13 @@ def run(cameras, day, *, styles: list[str], color: str, length: float | None, de
         for style in styles if video else []:
             render_video(paths, tubes, bgs, style=style, color=color, length=length, density=density, speed=speed,
                          max_tube=max_tube, fps=fps, labels=labels, tag=f"{style}_{color}{suffix}",
-                         drift_min=drift_min)
+                         drift_min=drift_min, clock_mode=clock_mode)
         for kind in extras:
             subset = [t for t in all_tubes if t.category == kind]
             print(f"   {CATEGORY_NAME.get(kind, kind)} only:")
             render_video(paths, subset, bgs, style=styles[0], color=color, length=length, density=density,
                          speed=speed, max_tube=max_tube, fps=fps, labels=labels,
-                         tag=f"{styles[0]}_{color}_{kind}", drift_min=drift_min)
+                         tag=f"{styles[0]}_{color}_{kind}", drift_min=drift_min, clock_mode=clock_mode)
         if still_sets:
             paths.out.mkdir(parents=True, exist_ok=True)
         for kind, subset in still_sets:

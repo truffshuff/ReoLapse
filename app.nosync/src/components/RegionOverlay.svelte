@@ -1,14 +1,17 @@
 <script>
   // Draw rectangles over the video (normalised 0..1 coordinates). Drawn boxes stay visible while
   // playing; only in `drawing` mode does the overlay take the mouse (so video controls keep working).
-  let { regions = $bindable([]), drawing = false } = $props();
+  // `view`: the visible part of the picture when the video is zoomed ({ x, y, w }, fractions); regions
+  // are always stored in whole-picture coordinates.
+  let { regions = $bindable([]), drawing = false, view = { x: 0, y: 0, w: 1 } } = $props();
 
   let el = $state();
   let draft = $state(null);
 
   function point(e) {
     const r = el.getBoundingClientRect();
-    return { x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)) };
+    const px = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), py = Math.min(1, Math.max(0, (e.clientY - r.top) / r.height));
+    return { x: view.x + px * view.w, y: view.y + py * view.w };
   }
 
   function down(e) {
@@ -28,10 +31,11 @@
     if (!draft) return;
     const r = { x0: Math.min(draft.ax, draft.bx), y0: Math.min(draft.ay, draft.by), x1: Math.max(draft.ax, draft.bx), y1: Math.max(draft.ay, draft.by) };
     draft = null;
-    if (r.x1 - r.x0 > 0.01 && r.y1 - r.y0 > 0.02) regions = [...regions, r];
+    if (r.x1 - r.x0 > 0.01 * view.w && r.y1 - r.y0 > 0.02 * view.w) regions = [...regions, r];
   }
 
-  const box = (r) => `left:${r.x0 * 100}%;top:${r.y0 * 100}%;width:${(r.x1 - r.x0) * 100}%;height:${(r.y1 - r.y0) * 100}%`;
+  const box = (r) => `left:${((r.x0 - view.x) / view.w) * 100}%;top:${((r.y0 - view.y) / view.w) * 100}%;`
+    + `width:${((r.x1 - r.x0) / view.w) * 100}%;height:${((r.y1 - r.y0) / view.w) * 100}%`;
   const draftBox = $derived(draft && box({ x0: Math.min(draft.ax, draft.bx), y0: Math.min(draft.ay, draft.by),
                                           x1: Math.max(draft.ax, draft.bx), y1: Math.max(draft.ay, draft.by) }));
 </script>
@@ -50,7 +54,7 @@
 </div>
 
 <style>
-  .overlay { position: absolute; inset: 0; pointer-events: none; }
+  .overlay { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
   .overlay.drawing { pointer-events: auto; cursor: crosshair; background: rgba(14, 16, 20, 0.15); }
   .region { position: absolute; border: 2px solid var(--accent); border-radius: 4px; background: rgba(142, 168, 255, 0.12); }
   .region.draft { border-style: dashed; }

@@ -45,6 +45,9 @@ card opens it in the Player. Use ‹ › or the *Recent days* strip to change da
 
 - **Synopsis video**: the day's moving objects over a time-lapse of the scene. The clock (bottom left)
   shows the time of day the background is at; each object's tag shows its own real time.
+- **Zoom**: pinch on the trackpad (or ⌘ + scroll) over the video, or the − / + buttons in its corner;
+  drag to move around while zoomed, click the level (e.g. *2.7×*) to reset. Works on the original
+  footage below and on each camera in All cameras too. Boxes drawn with Find in area follow the zoom.
 - **Style**: *cutout* (solid), *ghost* (see-through, easier when busy), *outline* (colored edge).
   Which ones are rendered is set in Settings → Rendering defaults.
 - **Show**: *Everything*, or a video of just the **People**, **Vehicles** or **Animals**. With fewer objects
@@ -214,6 +217,15 @@ better trade than switching to Clear.
 | **Detector size** | 960 fast; 1280 recommended; 1920 finds small/distant objects at about half the speed. |
 
 ### Rendering
+
+**Clock: adaptive** (on by default). A synopsis squeezes the day into minutes, so its clock races
+(about 3 minutes of the day per second of an 8-minute video) while people move at near-real speed: a
+30-second walk can span 40 minutes of the clock while its tag keeps showing when they were really there.
+The adaptive clock gives busy times of day more of the video and quiet ones (the night) less, so where
+things happen the clock runs closer to the objects' pace; on a real day it halved that gap (a 29 s walk:
+44 → 20 minutes of clock) and the night passes in seconds. Switch it off for a clock that runs at one
+rate all day. It applies to videos rendered afterwards: queue a *Render* to redo a day. Raising **object
+speed** (up to 8×) or lowering **objects on screen** (a longer video) shortens the gap further.
 
 Styles (one video each), tag colors (by type, or by time of day), **allowed time shift** (how far an
 object may be moved from its real time to reduce overlap; 0 = exact), **object speed**, and **objects on

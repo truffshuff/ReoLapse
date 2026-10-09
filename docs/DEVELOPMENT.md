@@ -69,7 +69,9 @@ near (the parked car someone reaches into) are saved with it as *context*. For w
 background medians are built from the same decoded frames, so each recording is read once. A checkpoint
 every 2 minutes of footage makes the scan resumable.
 
-**Render.** Each tube is placed near its real time of day (`video_t = day_t / 86400 × length`), shifted
+**Render.** Each tube is placed near its real time of day through a `TimeMap` (even: `video_t = day_t /
+86400 × length`; adaptive: 5-minute knots whose video time follows the objects in them plus a 15% floor;
+the knots go in the sidecar's `map`), shifted
 by at most the allowed drift where that removes real overlap, and composited over cross-faded
 background medians; tags show each frame's real time. The timing sidecar lets the app map time of day
 to video time. *Only* renders (`--only person`, or `render.per_type` in Settings, which adds

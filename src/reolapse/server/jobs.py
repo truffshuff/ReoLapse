@@ -121,6 +121,7 @@ def pipeline_args(job: Job, cfg: dict) -> list[str]:
             args += ["--done-since", f"{job.created:.0f}"]
     if job.kind in ("render", "run"):
         styles = r["styles"] if isinstance(r["styles"], list) else [r["styles"]]
+        args += ["--clock", str(r.get("clock", "adaptive"))]
         args += ["--style", ",".join(styles), "--color", str(r["color"]), "--drift", str(r["drift"]),
                  "--speed", str(r["speed"]), "--density", str(r["density"]), "--max-tube", str(r["max_tube"])]
         only = [k for k in job.options.get("only", []) if k in ("person", "vehicle", "animal")]

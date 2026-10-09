@@ -1,4 +1,6 @@
 <script>
+  import ZoomControls from '../components/ZoomControls.svelte';
+  import { Zoom, zoomable, viewBox } from '../lib/zoom.svelte.js';
   // Synced original footage: every camera's real recording from the same second, played together.
   import { onMount } from 'svelte';
   import Icon from '../components/Icon.svelte';
@@ -32,6 +34,8 @@
   let autoplay = $state(false);
 
   const cameras = $derived(days.find((d) => d.day === day)?.cameras ?? []);
+  const zooms = new Map(); // camera -> its own zoom
+  const zoomFor = (camera) => zooms.get(camera) ?? zooms.set(camera, new Zoom()).get(camera);
   const lanes = $derived(cameras.map((c) => ({ camera: c.camera, hourly: c.hourly, max: Math.max(1, ...c.hourly) })));
   const events = $derived.by(() => {
     if (t == null) return [];
@@ -116,12 +120,14 @@
   {#if !loaded}<div class="empty">Loading…</div>{/if}
   <section class="grid">
     {#each cameras as c (c.camera)}
-      <figure class:picked={picked?.camera === c.camera}>
+      <figure class:picked={picked?.camera === c.camera} {@attach zoomable(zoomFor(c.camera))}>
         {#if t != null}
           <!-- svelte-ignore a11y_media_has_caption -->
           <video bind:this={videos[c.camera]} src={media.clip(day, c.camera, t, CLIP_SECONDS)} muted preload="auto"
+                 style:object-view-box={viewBox(zoomFor(c.camera))} style:cursor={zoomFor(c.camera).z > 1 ? 'grab' : null}
                  onloadeddata={() => (vstate[c.camera] = 'ready')} onerror={() => (vstate[c.camera] = 'error')}></video>
           <VideoState status={vstate[c.camera] ?? 'loading'} busy={jobState.downloading} />
+          <ZoomControls zoom={zoomFor(c.camera)} />
         {/if}
         <figcaption><span class="tag">{c.camera}{c.footage?.stream ? ` · ${STREAM_NAME[c.footage.stream]}` : ''}</span></figcaption>
       </figure>

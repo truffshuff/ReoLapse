@@ -11,7 +11,8 @@
   const mismatch = $derived(analysis?.stream && footage?.stream && footage.stream !== 'mixed' && analysis.stream !== footage.stream);
   const tags = $derived(render ? [render.style, render.color === 'time' ? 'tags by time' : null,
     render.drift_min != null ? `±${render.drift_min} min` : null, render.speed ? `${render.speed}× speed` : null,
-    render.density ? `~${render.density} on screen` : null].filter(Boolean).join(' · ') : '');
+    render.density ? `~${render.density} on screen` : null,
+    render.clock === 'adaptive' ? 'adaptive clock' : render.clock === 'even' ? 'even clock' : null].filter(Boolean).join(' · ') : '');
 </script>
 
 <dl class="info small">

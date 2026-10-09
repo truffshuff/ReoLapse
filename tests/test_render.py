@@ -141,3 +141,35 @@ def test_resumed_job_keeps_cameras_finished_by_older_versions(tmp_path, monkeypa
     assert finished_since(paths, queued, **settings)
     (paths.tubes_out / CHECKPOINT).write_text("{}")  # still in progress
     assert not finished_since(paths, queued, **settings)
+
+
+def test_adaptive_clock_gives_busy_times_more_video():
+    from reolapse.render import TimeMap
+
+    class T:  # a tube as the clock sees it
+        def __init__(self, t0, d):
+            self.t0, self.out_duration = t0, d
+
+    tubes = [T(17 * 3600 + i * 20, 10.0) for i in range(30)]  # a busy 5-6 PM
+    m = TimeMap.adaptive(tubes, 600.0)
+    assert m.to_video(86400) == 600.0 and m.to_video(0) == 0.0
+    assert all(b >= a for a, b in zip(m.video, m.video[1:]))  # never runs backwards
+    busy = m.to_video(17.5 * 3600) - m.to_video(17 * 3600)
+    night = m.to_video(3.5 * 3600) - m.to_video(3 * 3600)
+    assert busy > 20 * night  # half an hour at 5 PM gets far more of the video than at 3 AM
+    assert night > 0  # but the night still passes on screen
+    assert abs(m.to_day(m.to_video(61234.0)) - 61234.0) < 1e-6
+    even = TimeMap.even(600.0)
+    assert even.to_video(43200) == 300.0 and TimeMap.adaptive([], 600.0).mode == "even"
+
+
+def test_adaptive_video_records_its_clock(tmp_path, monkeypatch):
+    import json
+
+    paths = _day(tmp_path, monkeypatch)
+    _render(stills=False, clock_mode="adaptive")
+    side = json.loads((paths.published / "synopsis_cutout_category.json").read_text())
+    assert side["clock"] == "adaptive" and side["map"][0] == [0.0, 0.0] and side["map"][-1][0] == 86400.0
+    _render(stills=False)
+    side = json.loads((paths.published / "synopsis_cutout_category.json").read_text())
+    assert side["clock"] == "even" and side["map"] is None
