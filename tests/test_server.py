@@ -619,3 +619,51 @@ def test_per_camera_analysis_settings_are_fixed_and_passed(env):
     assert _json.loads(args[args.index("--camera-settings") + 1]) == {"Porch Left": {"imgsz": 960, "fps": 5}}
     with pytest.raises(ValueError):
         settings_mod.save({"camera_analysis": {"Garage": {"imgsz": 1000}}})
+
+
+def test_results_are_shared_and_the_newer_copy_is_read(env, tmp_path, monkeypatch):
+    import os
+    from datetime import date
+    from reolapse import config, sync, settings as settings_mod
+    from reolapse.config import DayPaths
+
+    monkeypatch.setattr(config, "WORK_ROOT", tmp_path / "work")
+    settings_mod.save({"cameras": ["Garage"]})
+    p = DayPaths("Garage", date(2026, 10, 1))
+    p.tubes_out.mkdir(parents=True)
+    (p.tubes_out / "036000.0_person.pkl").write_bytes(b"x")
+    (p.tubes_out / "analysis.json").write_text("{}")
+    (p.tubes_out / "_thumbs").mkdir()
+    assert [d.day for d in sync.pending()] == [p.day]
+    sync.share_results(p, log=lambda *_: None)
+    shared = p.root / "tubes"
+    assert (shared / "036000.0_person.pkl").exists() and not (shared / "_thumbs").exists()
+    assert not sync.pending() and p.tubes == p.work / "tubes"  # same age: this Mac's copy
+    later = (shared / "analysis.json").stat().st_mtime + 100  # another Mac analyzed it again since
+    os.utime(shared / "analysis.json", (later, later))
+    assert p.tubes == shared
+
+
+def test_scan_that_stops_for_memory_is_restarted(env, tmp_path):
+    import asyncio
+    marker = tmp_path / "ran"
+
+    def command(job):  # exits 75 (memory restart) the first time, then succeeds
+        return [sys.executable, "-c",
+                f"import pathlib,sys; p=pathlib.Path({str(marker)!r}); first=not p.exists(); p.write_text('x'); "
+                "sys.exit(75 if first else 0)"]
+
+    async def scenario():
+        q = JobQueue(command)
+        q.start(watch_share=False)
+        (job,) = q.submit("analyze", "2026-10-09", ["Garage"])
+        await _until(lambda: job.status == "done")
+        assert job.restarts == 1 and any("Restarting the scan to free memory" in l for l in job.log)
+
+    asyncio.run(scenario())
+
+
+def test_memory_reading():
+    from reolapse.analyze import memory_limit, memory_used
+    used = memory_used()
+    assert used and 10e6 < used < 64e9 and memory_limit() > 1e9

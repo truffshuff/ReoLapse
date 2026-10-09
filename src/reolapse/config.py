@@ -110,13 +110,33 @@ class DayPaths:
     def events(self) -> Path:
         return self.root / "events.json"
 
+    # Files written last by an analysis: their time says which copy of a folder is newer.
+    _STAMPS = {"tubes": ("analysis.json", "index.json"), "bg": (".complete",)}
+
+    def _stamp(self, folder: Path, sub: str) -> float:
+        for name in self._STAMPS.get(sub, ()):
+            try:
+                return (folder / name).stat().st_mtime
+            except OSError:
+                pass
+        return 0.0
+
     def _existing(self, sub: str) -> Path:
-        """Read location: the work area, else (for days processed before it was set) the share."""
+        """Read location: this Mac's working folder or the share, whichever has the newer complete copy
+        (another Mac may have analyzed the day since; analyses copy their results to the share)."""
         local = self.work / sub
-        if local.exists() or self.work == self.root:
+        if self.work == self.root:
             return local
         shared = self.root / sub
+        if local.exists() and shared.exists():
+            return shared if self._stamp(shared, sub) > self._stamp(local, sub) + 1 else local
+        if local.exists():
+            return local
         return shared if shared.exists() else local
+
+    def copies(self, sub: str) -> list[Path]:
+        """Every existing copy of a folder (working folder and share), e.g. to keep corrections in step."""
+        return [p for p in dict.fromkeys([self.work / sub, self.root / sub]) if p.exists()]
 
     @property
     def backgrounds(self) -> Path:

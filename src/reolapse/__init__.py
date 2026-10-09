@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import json
+import sys
 from datetime import date, timedelta
 
 from .config import DEFAULT_CAMERAS
@@ -119,10 +120,13 @@ def main() -> None:
         asyncio.run(fetch.run(cameras, day, args.stream))
     if args.cmd in ("analyze", "run"):
         from . import analyze
-        analyze.run(cameras, day, fps=args.fps, model=args.model, imgsz=args.imgsz,
-                    types=set(args.types.split(",")), skip_bg=args.skip_bg,
-                    hours=tuple(float(x) for x in args.hours.split("-")), done_since=args.done_since,
-                    per_camera=json.loads(args.camera_settings) if args.camera_settings else None)
+        try:
+            analyze.run(cameras, day, fps=args.fps, model=args.model, imgsz=args.imgsz,
+                        types=set(args.types.split(",")), skip_bg=args.skip_bg,
+                        hours=tuple(float(x) for x in args.hours.split("-")), done_since=args.done_since,
+                        per_camera=json.loads(args.camera_settings) if args.camera_settings else None)
+        except analyze.MemoryRestart:
+            sys.exit(analyze.EXIT_MEMORY_RESTART)
     if args.cmd in ("render", "run"):
         from . import render
         render.run(cameras, day, styles=args.style.split(","), color=args.color, length=args.length,

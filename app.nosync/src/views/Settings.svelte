@@ -123,6 +123,19 @@
     }
   }
 
+  let sharing = $state(null);
+  let shareMsg = $state('');
+  async function shareNow() {
+    shareMsg = 'Copying…';
+    try {
+      const r = await api.shareNow();
+      shareMsg = `Shared ${r.shared.length} camera-day${r.shared.length === 1 ? '' : 's'}.`;
+      sharing = await api.sharing();
+    } catch (e) {
+      shareMsg = `Couldn't share: ${e.message}`;
+    }
+  }
+
   async function runNightNow() {
     night = await api.nightlyRun();
   }
@@ -170,6 +183,7 @@
     [s, health, nvr, models, upd] = await Promise.all([api.settings(), api.health(), api.nvr(), api.models(), api.update()]);
     api.nightly(true).then((n) => (night = n)).catch(() => {});
     loadStorage();
+    api.sharing().then((r) => (sharing = r)).catch(() => {});
     setLoginFrom(nvr);
     saved = structuredClone($state.snapshot(s));
   });
@@ -412,6 +426,17 @@
             {/if}
           {/each}
         </div>
+        {#if !store?.same}
+          <div class="row"><h3 class="sub-h">Sharing with other Macs</h3>
+            <InfoTip text="Each analysis copies its objects and background images to the archive when it finishes, so another Mac using the same archive sees the day too (each Mac reads whichever copy is newer). Days analyzed before this existed can be copied here." /></div>
+          {#if sharing?.days?.length}
+            <div class="row"><span class="small">{sharing.days.length} camera-day{sharing.days.length === 1 ? '' : 's'} on this Mac aren't on the archive yet.</span>
+              <button class="btn" onclick={shareNow} disabled={shareMsg === 'Copying…'}>Share now</button>
+              {#if shareMsg}<span class="small muted">{shareMsg}</span>{/if}</div>
+          {:else if sharing}
+            <p class="desc">Everything this Mac analyzed is on the archive.{shareMsg ? ` ${shareMsg}` : ''}</p>
+          {/if}
+        {/if}
         <div class="row"><h3 class="sub-h">Cleanup</h3><InfoTip text={HELP.cleanup} /></div>
         {#if store}
           {#if store.items.length}

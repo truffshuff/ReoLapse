@@ -354,6 +354,50 @@ def _resume_point(paths: DayPaths, key: dict) -> dict | None:
     return ck if ck.get("key") == key else None
 
 
+class MemoryRestart(Exception):
+    """The scan grew too big and stopped at a checkpoint; the queue restarts it from there."""
+
+
+EXIT_MEMORY_RESTART = 75  # the job queue restarts a scan that exits with this
+
+
+def memory_used() -> int | None:
+    """This process's memory footprint in bytes: on macOS what Activity Monitor shows, including
+    memory that's been compressed or swapped out (resident size alone shrinks while swapping)."""
+    import os
+    import sys
+
+    if sys.platform == "darwin":
+        try:
+            import ctypes
+
+            class RUsage(ctypes.Structure):  # rusage_info_v0
+                _fields_ = [("uuid", ctypes.c_uint8 * 16)] + [(n, ctypes.c_uint64) for n in (
+                    "user_time", "system_time", "pkg_idle_wkups", "interrupt_wkups", "pageins", "wired_size",
+                    "resident_size", "phys_footprint", "proc_start_abstime", "proc_exit_abstime")]
+
+            ru = RUsage()
+            if ctypes.CDLL("/usr/lib/libSystem.B.dylib").proc_pid_rusage(os.getpid(), 0, ctypes.byref(ru)) == 0:
+                return int(ru.phys_footprint)
+        except (OSError, AttributeError):
+            pass
+    try:
+        import psutil
+
+        return psutil.Process().memory_info().rss
+    except Exception:
+        return None
+
+
+def memory_limit() -> int:
+    """REOLAPSE_MEMORY_LIMIT_GB, else 60% of this Mac's memory."""
+    import os
+
+    if os.environ.get("REOLAPSE_MEMORY_LIMIT_GB"):
+        return int(float(os.environ["REOLAPSE_MEMORY_LIMIT_GB"]) * 1e9)
+    return int(0.6 * os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES"))
+
+
 def _release_gpu_cache() -> None:
     """Hand PyTorch's cached GPU memory back to macOS (GPU memory is the Mac's RAM). Called at each
     checkpoint: a day-long scan's cache can otherwise creep up until the Mac swaps, which slowed a
@@ -418,11 +462,18 @@ def detect_tubes(paths: DayPaths, recs: list[Recording], windows, fps: float, mo
             shutil.rmtree(paths.tubes_out)
         paths.tubes_out.mkdir(parents=True)
 
+    limit = memory_limit()
+
     def checkpoint(t: float) -> None:
         tmp = paths.tubes_out / (CHECKPOINT + ".tmp")
         tmp.write_text(json.dumps({"key": key, "t": t, "metas": metas}, separators=(",", ":")))
         tmp.replace(paths.tubes_out / CHECKPOINT)
         _release_gpu_cache()
+        used = memory_used()
+        if used and used > limit:  # stop here (the checkpoint is saved) and let the queue restart us
+            print(f"\n   memory use reached {used / 1e9:.1f} GB (limit {limit / 1e9:.1f} GB); restarting the scan"
+                  f" from {clock(t)} to free it")
+            raise MemoryRestart(used)
 
     _no_nms_time_limit()
     model = YOLO(str(MODEL_DIR / model_name))
@@ -445,9 +496,11 @@ def detect_tubes(paths: DayPaths, recs: list[Recording], windows, fps: float, mo
         emit("analyze", cur / total if total else 1.0, paths.camera,
              f"{sum(stats.values())} objects · about {eta / 60:.0f} min left")
         share = 100 * yolo_frames / max(all_frames, 1)
+        used = memory_used()
         where = f"up to {clock(windows[0][0] + cur)}" if len(windows) == 1 else f"window {wi + 1} of {len(windows)}"
         print(f"\r   scanned {where} · {sum(stats.values())} objects so far · detector ran on {share:.0f}% of frames"
-              f" · {dur(el)} elapsed, about {dur(eta)} left   ", end="", flush=True)
+              f" · {dur(el)} elapsed, about {dur(eta)} left" + (f" · memory {used / 1e9:.1f} GB" if used else "") + "   ",
+              end="", flush=True)
 
     for wi, (a, b) in enumerate(windows):
         tracks: dict[int, Track] = {}
@@ -622,6 +675,12 @@ def run(cameras: list[str], day, *, fps: float, model: str, imgsz: int, types: s
         if inline is not None:
             mark_backgrounds_complete(paths.backgrounds_out, size)
         write_analysis_info(paths, recs, fps=fps, model=model, imgsz=imgsz, types=types, hours=hours)
+        try:
+            from .sync import share_results
+
+            share_results(paths)
+        except OSError as e:  # the day is done here either way; the share copy can be made later
+            print(f"   couldn't copy the results to the share ({e}); Settings > Storage can do it later")
         found = ", ".join(f"{n} {k}{'s' if n != 1 and k != 'person' else ''}".replace("person", "people" if n != 1 else "person")
                           for k, n in stats.most_common()) or "nothing that moved"
         print(f"   {cam} finished in {dur(time.monotonic() - cam_t0)}: {sum(stats.values())} moving objects ({found})")

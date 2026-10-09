@@ -72,6 +72,7 @@ class Job:
     log: deque = field(default_factory=lambda: deque(maxlen=400))
     proc: asyncio.subprocess.Process | None = field(default=None, repr=False)
     interrupted: bool = field(default=False, repr=False)  # stopped by a pause: goes back to the queue
+    restarts: int = field(default=0, repr=False)  # memory restarts this session
 
     FIELDS = ("id", "kind", "day", "cameras", "options", "status", "created", "started", "finished",
               "returncode", "progress", "status_line", "order", "group", "waiting")
@@ -89,6 +90,9 @@ class Job:
 
 _OS_NOISE = re.compile(r"\s*\S+\(\d+\) MallocStackLogging:[^\r\n]*")
 
+
+EXIT_MEMORY_RESTART = 75  # analyze exits with this after checkpointing when it grew too big
+MAX_RESTARTS = 50
 
 ANALYSIS_KEYS = ("fps", "types", "model", "imgsz")
 
@@ -497,6 +501,11 @@ class JobQueue:
             self._write_log(job, f"Could not run the job: {e}")
             job.returncode = -1
         job.status_line = ""
+        if (job.returncode == EXIT_MEMORY_RESTART and not job.interrupted and job.status != "cancelled"
+                and job.restarts < MAX_RESTARTS):
+            job.restarts += 1  # the scan stopped itself at a checkpoint to free memory: go again at once
+            self._write_log(job, f"Restarting the scan to free memory ({job.restarts}); it continues from its checkpoint.")
+            job.interrupted = True
         if job.returncode != 0 and not job.interrupted and job.status != "cancelled" and not await self._share_ok():
             job.interrupted = True  # failed because the share went away: pause rather than fail
             self.pause("the network share isn't reachable", auto=True)

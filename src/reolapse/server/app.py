@@ -274,7 +274,8 @@ def create_app(queue: JobQueue | None = None, updater=None) -> FastAPI:
         if not (paths.tubes / f"{obj_id}.pkl").is_file():
             raise HTTPException(404, "no such object")
         try:
-            review.save_correction(paths.tubes, obj_id, body.value)
+            for tubes in paths.copies("tubes") or [paths.tubes]:  # this Mac's copy and the share's
+                review.save_correction(tubes, obj_id, body.value)
         except (ValueError, OSError) as e:
             raise HTTPException(400, str(e))
         library._cache.pop((paths.camera, day), None)
@@ -501,6 +502,29 @@ def create_app(queue: JobQueue | None = None, updater=None) -> FastAPI:
              "items": p.summary(), "last_cleanup": scheduler.state.get("last_cleanup")}
         storage_cache["v"] = v
         return v
+
+    @app.get("/api/storage/sharing")
+    async def sharing_pending():
+        """Days this Mac analyzed whose results aren't on the share yet."""
+        from .. import sync
+
+        days = await asyncio.to_thread(sync.pending)
+        return {"days": [{"camera": p.camera, "day": p.day.isoformat()} for p in days]}
+
+    @app.post("/api/storage/share")
+    async def share_now():
+        """Copy those days' objects and backgrounds to the share (skips days with running jobs)."""
+        from .. import sync
+
+        busy = scheduler.busy_days()
+        done = []
+        for p in await asyncio.to_thread(sync.pending):
+            if (p.camera, p.day.isoformat()) in busy:
+                continue
+            await asyncio.to_thread(sync.share_results, p, lambda *_: None)
+            done.append({"camera": p.camera, "day": p.day.isoformat()})
+        library._cache.clear()
+        return {"shared": done}
 
     @app.post("/api/storage/cleanup")
     async def storage_cleanup():
