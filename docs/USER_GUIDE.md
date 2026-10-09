@@ -5,6 +5,7 @@
 - [Player](#player) and [Find in area](#find-in-area)
 - [All cameras](#all-cameras)
 - [Insights](#insights)
+- [PDF report](#pdf-report)
 - [Jobs](#jobs): lanes, pausing, logs
 - [Settings](#settings): NVR, cameras and streams, analysis, rendering, storage, updates
 - [What counts as a moving object](#what-counts-as-a-moving-object)
@@ -111,6 +112,23 @@ without the street traffic, or where the cars actually go. Every render makes th
 (about 15 seconds each per camera). For days rendered before they existed, choose a type and click
 **Make pictures for each type**: a pictures-only render for every camera of that day, about a minute per
 camera, with no videos re-rendered.
+
+## PDF report
+
+**PDF report** (on Today and Insights) builds a printable report of a day:
+
+- a summary page: each camera's people, vehicles and animals, its footage (Clear/Fluent) and the
+  settings its objects were found with;
+- per camera: objects per hour (stacked by type, with a scale), the scene at midday, and the trails,
+  heatmap and group shot pictures;
+- **detections by hour**: every object grouped by the hour it appeared, with its cutout, time, type
+  and how long it was on camera, the same cards as *Find in area*.
+
+Above the preview choose the cameras, the types (with one type, its own trails/heatmap/group shot are
+used when they exist) and how many pictures per hour (all, up to 24 or 12, or none: then each hour
+lists just its counts). **Save PDF** renders it at Letter size and asks where to save it (Downloads by
+default), then opens it. A busy day with all three cameras and up to 24 pictures an hour is about
+25 pages and 7 MB.
 
 ## Jobs
 

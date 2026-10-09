@@ -24,6 +24,7 @@ never sends footage anywhere.
 | ![All cameras](docs/screenshots/all-cameras.jpg) | **All cameras**: every camera's real recording from the same second, played together. Pick an event detected on any camera and all of them jump to it, so you can follow someone from one view to the next. |
 | ![Insights](docs/screenshots/insights-trails.jpg) | **Insights**: every path of the day colored by time, a heatmap of where things moved, and a "group shot" of everyone who came by; for everything or just people, vehicles or animals. |
 | ![Jobs](docs/screenshots/jobs.jpg) | **Jobs**: download, find objects and render, in two lanes that run side by side, with live progress, readable logs, reordering, retry, and pause/resume (automatic when the laptop leaves home). |
+| ![Detections by hour](docs/screenshots/find-in-area.jpg) | **PDF report**: a printable day: counts per camera, objects per hour, the day's pictures and every detection grouped by hour with its cutout and time. |
 | ![Settings](docs/screenshots/settings.jpg) | **Settings**: the NVR login (kept in the Keychain), which cameras and which stream (Fluent or Clear), analysis and rendering choices with an explanation for each, where files go, and **Check for updates**. |
 
 The three synopsis styles, at the same moment:

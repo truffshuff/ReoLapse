@@ -45,9 +45,10 @@ export const api = {
 };
 
 export const media = {
-  out: (day, cam, name) => `/api/days/${day}/${encodeURIComponent(cam)}/out/${encodeURIComponent(name)}`,
-  bg: (day, cam, slot) => `/api/days/${day}/${encodeURIComponent(cam)}/bg/${slot}`,
-  thumb: (day, cam, id) => `/api/days/${day}/${encodeURIComponent(cam)}/objects/${encodeURIComponent(id)}/thumb`,
+  out: (day, cam, name, w = 0) => `/api/days/${day}/${encodeURIComponent(cam)}/out/${encodeURIComponent(name)}${w ? `?w=${w}` : ''}`,
+  bg: (day, cam, slot, w = 0) => `/api/days/${day}/${encodeURIComponent(cam)}/bg/${slot}${w ? `?w=${w}` : ''}`,
+  thumb: (day, cam, id, size = 0) =>
+    `/api/days/${day}/${encodeURIComponent(cam)}/objects/${encodeURIComponent(id)}/thumb${size ? `?size=${size}` : ''}`,
   clip: (day, cam, t, dur = 60) => `/api/days/${day}/${encodeURIComponent(cam)}/clip?t=${Math.round(t)}&dur=${dur}`,
 };
 

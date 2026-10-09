@@ -70,6 +70,7 @@
       <div class="muted sub">Where things moved, all day in one picture</div>
     </div>
     <div class="push row">
+      {#if day}<a class="btn" href={`#/report?day=${day}`}>PDF report</a>{/if}
       <select bind:value={day} aria-label="Day">{#each days as d}<option value={d.day}>{d.day}</option>{/each}</select>
       <div class="seg" role="group" aria-label="Camera">
         {#each cameras as c}<button aria-pressed={c.camera === camera} onclick={() => (camera = c.camera)}>{c.camera}</button>{/each}

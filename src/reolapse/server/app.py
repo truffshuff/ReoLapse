@@ -159,19 +159,43 @@ def create_app(queue: JobQueue | None = None, updater=None) -> FastAPI:
     def camera_day(day: str, camera: str, fresh: bool = False):
         return library.camera_day(_check_camera(camera), _check_day(day), fresh=fresh)
 
+    def _scaled(f: Path, w: int):
+        """A JPEG picture at most `w` pixels wide (reports: print size, not 2560 px), cached in the
+        working folder so it isn't rescaled for every report."""
+        import cv2
+
+        w = max(200, min(w, 4000))
+        st = f.stat()
+        import hashlib
+
+        key = hashlib.sha1(f"{f}|{st.st_mtime}|{st.st_size}".encode()).hexdigest()[:16]
+        cache = config.WORK_ROOT / "_scaled" / f"{key}_{w}.jpg"
+        if not cache.exists():
+            img = cv2.imread(str(f))
+            if img is None or img.shape[1] <= w:
+                return FileResponse(f, media_type="image/jpeg")
+            img = cv2.resize(img, (w, round(img.shape[0] * w / img.shape[1])), interpolation=cv2.INTER_AREA)
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            tmp = cache.with_suffix(".tmp")
+            tmp.write_bytes(cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 85])[1].tobytes())
+            tmp.replace(cache)
+        return FileResponse(cache, media_type="image/jpeg")
+
     @app.get("/api/days/{day}/{camera}/out/{name}")
-    def output(day: str, camera: str, name: str):
+    def output(day: str, camera: str, name: str, w: int = 0):
         f = library.output_file(_check_camera(camera), _check_day(day), name)
         if f is None:
             raise HTTPException(404, "no such output")
+        if w and f.suffix.lower() == ".jpg":
+            return _scaled(f, w)
         return FileResponse(f)  # supports Range requests, so <video> can seek
 
     @app.get("/api/days/{day}/{camera}/bg/{slot}")
-    def background(day: str, camera: str, slot: int):
+    def background(day: str, camera: str, slot: int, w: int = 0):
         f = library.background_file(_check_camera(camera), _check_day(day), slot)
         if f is None:
             raise HTTPException(404, "no such background")
-        return FileResponse(f, media_type="image/jpeg")
+        return _scaled(f, w) if w else FileResponse(f, media_type="image/jpeg")
 
     @app.get("/api/days/{day}/{camera}/clip")
     async def clip(day: str, camera: str, t: float, dur: float = 30.0):
@@ -222,21 +246,50 @@ def create_app(queue: JobQueue | None = None, updater=None) -> FastAPI:
         return {"width": index["width"], "height": index["height"], "objects": tube_index.query(index, boxes, cats)}
 
     @app.get("/api/days/{day}/{camera}/objects/{obj_id}/thumb")
-    def object_thumb(day: str, camera: str, obj_id: str):
-        """The object's middle crop (PNG with transparency)."""
+    def object_thumb(day: str, camera: str, obj_id: str, size: int = 0):
+        """The object's middle crop (PNG with transparency); size > 0 shrinks it to fit that many pixels
+        and returns a JPEG on the report's light gray (so a PDF with hundreds of objects stays small)."""
         import pickle
 
         from fastapi.responses import Response
 
         if not library.DAY_RE.fullmatch(day) or not re.fullmatch(r"[0-9.]+_[a-z]+(_\d+)?", obj_id):
             raise HTTPException(400, "bad object id")
-        f = DayPaths(_check_camera(camera), date.fromisoformat(day)).tubes / f"{obj_id}.pkl"
+        tubes = DayPaths(_check_camera(camera), date.fromisoformat(day)).tubes
+        f = tubes / f"{obj_id}.pkl"
         if not f.is_file():
             raise HTTPException(404, "no such object")
-        with open(f, "rb") as fh:
-            frames = pickle.load(fh)["frames"]
-        return Response(frames[len(frames) // 2][5], media_type="image/png",
-                        headers={"Cache-Control": "max-age=86400"})
+        # Object files hold every frame (up to tens of MB); keep the one picture the app shows next to
+        # them, so lists and reports with hundreds of objects don't read gigabytes. A re-analysis
+        # replaces the whole folder, cache included.
+        size = max(0, min(size, 2000))
+        cached = tubes / "_thumbs" / (f"{obj_id}_{size}.jpg" if size else f"{obj_id}.png")
+        try:
+            png = cached.read_bytes() if cached.stat().st_mtime >= f.stat().st_mtime else None
+        except OSError:
+            png = None
+        if png is None:
+            with open(f, "rb") as fh:
+                frames = pickle.load(fh)["frames"]
+            png = frames[len(frames) // 2][5]
+            if size:
+                import cv2
+                import numpy as np
+
+                img = cv2.imdecode(np.frombuffer(png, np.uint8), cv2.IMREAD_UNCHANGED)
+                scale = min(1.0, size / max(img.shape[:2]))
+                img = cv2.resize(img, (max(1, round(img.shape[1] * scale)), max(1, round(img.shape[0] * scale))),
+                                 interpolation=cv2.INTER_AREA)
+                a = img[:, :, 3:4].astype(np.float32) / 255
+                paper = np.array([242, 244, 244], np.float32)  # #F4F4F2 in BGR, the report's cell color
+                flat = (img[:, :, :3] * a + paper * (1 - a)).astype(np.uint8)
+                png = cv2.imencode(".jpg", flat, [cv2.IMWRITE_JPEG_QUALITY, 85])[1].tobytes()
+            try:
+                cached.parent.mkdir(exist_ok=True)
+                cached.write_bytes(png)
+            except OSError:
+                pass  # read-only location: serve it uncached
+        return Response(png, media_type="image/jpeg" if size else "image/png", headers={"Cache-Control": "max-age=300"})
 
     # ---------------------------------------------------------------- jobs
     @app.get("/api/jobs")

@@ -178,6 +178,12 @@ def test_area_query(env):
         assert (tubes / tube_index.INDEX_NAME).exists()  # built once and cached
         r = client.get("/api/days/2026-10-01/Garage/objects/000100.0_person/thumb")
         assert r.status_code == 200 and r.headers["content-type"] == "image/png"
+        assert (tubes / "_thumbs" / "000100.0_person.png").read_bytes() == r.content  # cached for next time
+        assert client.get("/api/days/2026-10-01/Garage/objects/000100.0_person/thumb").content == r.content
+        small = client.get("/api/days/2026-10-01/Garage/objects/000100.0_person/thumb", params={"size": 4})
+        import cv2, numpy as np
+        assert small.headers["content-type"] == "image/jpeg"
+        assert max(cv2.imdecode(np.frombuffer(small.content, np.uint8), cv2.IMREAD_UNCHANGED).shape[:2]) == 4
         assert client.get("/api/days/2026-10-01/Garage/objects/..%2Fx/thumb").status_code in (400, 404)
 
 

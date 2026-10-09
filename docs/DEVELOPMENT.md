@@ -118,7 +118,7 @@ progress; with `REOLAPSE_PROGRESS=json` it also prints `@@{json}` progress lines
 | `GET /api/days/{day}/{camera}/bg/{slot}` | background images |
 | `GET /api/days/{day}/{camera}/clip?t=&dur=` | original footage from a time of day (stream copy) |
 | `GET /api/days/{day}/{camera}/objects?regions=&categories=` | objects whose center entered any region (normalized x0,y0,x1,y1;…) |
-| `GET /api/days/{day}/{camera}/objects/{id}/thumb` | an object's cutout |
+| `GET /api/days/{day}/{camera}/objects/{id}/thumb?size=` | an object's cutout (cached in `tubes/_thumbs`; `size` → small JPEG for reports) |
 | `GET/POST /api/jobs`, `GET /api/jobs/{id}`, `…/log` | queue (kind `run` becomes three jobs), status, full log file |
 | `POST /api/jobs/{id}/cancel`, `…/retry`, `…/move?delta=±1` | cancel, retry, reorder |
 | `DELETE /api/jobs/{id}`, `DELETE /api/jobs` | remove one finished job, or all of them (with logs) |
@@ -152,6 +152,13 @@ after an update) it runs `uv sync --frozen --no-dev --no-editable` into
 `~/Library/Application Support/Reolapse/engine` with a uv-managed Python, then starts
 `engine/bin/python -m reolapse serve` with the bundled tools on `PATH` and `REOLAPSE_APP_VERSION` set
 to the app's version (from source the server reads `app.nosync/package.json`).
+
+**PDF reports.** `#/report?day=&cams=&types=&per=` is a print-styled page; `electron/preload.cjs`
+exposes `window.reolapse.savePdf(hash)`, and the main process loads that hash with `print=1` in a
+hidden window, waits for `window.__reportReady` (set once data and every image have loaded), and
+`printToPDF`s it. Report images ask for print sizes (`out/…?w=1600`, `bg/…?w=1600`, cached under
+`<working folder>/_scaled`; cutouts `?size=240`). Outside Electron the button falls back to
+`window.print()`.
 
 **Updates.** The app is ad-hoc signed, so it can't update itself in place (Squirrel/electron-updater
 need a Developer ID signature). `server/updates.py` asks the GitHub API for the latest release of

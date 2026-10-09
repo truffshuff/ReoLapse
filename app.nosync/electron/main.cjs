@@ -4,7 +4,7 @@
 // Packaged app: the installer carries the Python source, `uv` and ffmpeg. The first launch
 // (and the first launch after an update) builds the Python environment in the app's data
 // folder with a setup window; after that the server starts straight from it.
-const { app, BrowserWindow, shell, dialog } = require('electron');
+const { app, BrowserWindow, shell, dialog, ipcMain } = require('electron');
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -118,11 +118,49 @@ async function ensureServer() {
     : 'The reolapse server did not start within 2 minutes.');
 }
 
+// ---------------------------------------------------------------- PDF reports
+
+// The report page loads in a hidden window at print size; it sets window.__reportReady once its data
+// and every picture have loaded, then Chromium renders it to PDF.
+ipcMain.handle('report:pdf', async (_e, { hash, filename }) => {
+  if (!/^#\/report\?/.test(hash || '')) throw new Error('not a report');
+  const base = new URL(mainWindow?.webContents.getURL() || API).origin;
+  const win = new BrowserWindow({ show: false, width: 1100, height: 1400,
+    webPreferences: { contextIsolation: true, sandbox: true } });
+  try {
+    await win.loadURL(`${base}/${hash}${hash.includes('?') ? '&' : '?'}print=1`);
+    const deadline = Date.now() + 10 * 60 * 1000; // hundreds of object pictures can take a while
+    for (;;) {
+      const state = await win.webContents.executeJavaScript('window.__reportReady || null');
+      if (state === true) break;
+      if (typeof state === 'string') throw new Error(state); // the page reports its own error
+      if (Date.now() > deadline) throw new Error('the report took too long to load');
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    const pdf = await win.webContents.printToPDF({
+      pageSize: 'Letter', printBackground: true, preferCSSPageSize: true,
+      displayHeaderFooter: true, headerTemplate: '<span></span>',
+      footerTemplate: '<div style="font-size:8px;width:100%;text-align:center;color:#777">'
+        + '<span class="pageNumber"></span> / <span class="totalPages"></span></div>',
+    });
+    const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+      title: 'Save report', defaultPath: path.join(app.getPath('downloads'), filename || 'Reolapse report.pdf'),
+      filters: [{ name: 'PDF', extensions: ['pdf'] }],
+    });
+    if (canceled || !filePath) return { saved: false };
+    await fs.promises.writeFile(filePath, pdf);
+    shell.openPath(filePath);
+    return { saved: true, path: filePath };
+  } finally {
+    win.destroy();
+  }
+});
+
 async function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1440, height: 900, minWidth: 1100, minHeight: 700,
     backgroundColor: '#0E1014', titleBarStyle: 'hiddenInset', title: 'Reolapse',
-    webPreferences: { contextIsolation: true, sandbox: true },
+    webPreferences: { contextIsolation: true, sandbox: true, preload: path.join(__dirname, 'preload.cjs') },
   });
   // Start from the current build: an older cached UI must never outlive an update.
   await mainWindow.webContents.session.clearCache();

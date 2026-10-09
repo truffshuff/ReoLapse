@@ -54,7 +54,8 @@
       <h1>{current ? longDay(current.day) : 'Today'}</h1>
       <div class="muted sub">{current ? summary(current) : ' '}</div>
     </div>
-    <a class="btn primary push" href="#/jobs">Process a day</a>
+    {#if current}<a class="btn push" href={`#/report?day=${current.day}`}>PDF report</a>{/if}
+    <a class="btn primary" class:push={!current} href="#/jobs">Process a day</a>
   </header>
 
   {#if error}

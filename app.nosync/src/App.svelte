@@ -7,6 +7,7 @@
   import Insights from './views/Insights.svelte';
   import Jobs from './views/Jobs.svelte';
   import Settings from './views/Settings.svelte';
+  import Report from './views/Report.svelte';
   import { api, onJobEvents } from './lib/api.js';
   import { jobState } from './lib/busy.svelte.js';
 
@@ -22,7 +23,8 @@
   // Hash routing: #/player?day=2026-10-01&camera=Garage
   function parse() {
     const [path, query = ''] = location.hash.replace(/^#\/?/, '').split('?');
-    return { view: NAV.some((n) => n.id === path) ? path : 'today', params: Object.fromEntries(new URLSearchParams(query)) };
+    const known = NAV.some((n) => n.id === path) || path === 'report';
+    return { view: known ? path : 'today', params: Object.fromEntries(new URLSearchParams(query)) };
   }
   let route = $state(parse());
   let activeJobs = $state(0);
@@ -45,7 +47,7 @@
   });
 </script>
 
-<div class="shell">
+<div class="shell" class:bare={route.view === 'report' && route.params.print === '1'}>
   <nav aria-label="Main">
     <div class="brand"><span class="logo"><Icon name="logo" size={24} /></span>Reolapse</div>
     {#each NAV as item}
@@ -70,6 +72,7 @@
       {:else if route.view === 'insights'}<Insights params={route.params} />
       {:else if route.view === 'jobs'}<Jobs />
       {:else if route.view === 'settings'}<Settings />
+      {:else if route.view === 'report'}<Report params={route.params} />
       {/if}
     {/key}
   </main>
@@ -77,6 +80,8 @@
 
 <style>
   .shell { display: grid; grid-template-columns: 232px minmax(0, 1fr); min-height: 100%; }
+  .shell.bare { display: block; }
+  .shell.bare nav { display: none; }
   nav {
     display: flex; flex-direction: column; gap: 4px; padding: 20px 14px; background: var(--rail);
     border-right: 1px solid var(--line); position: sticky; top: 0; height: 100vh;
