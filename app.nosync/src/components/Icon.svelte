@@ -12,6 +12,10 @@
     <rect x="2" y="4" width="13" height="7" rx="1.5"></rect><rect x="2" y="13" width="13" height="7" rx="1.5"></rect><rect x="17" y="4" width="5" height="16" rx="1.5"></rect>
   {:else if name === 'insights'}
     <path d="M3 17c4-8 7 2 10-4s5-6 8-6"></path><path d="M3 21h18"></path>
+  {:else if name === 'search'}
+    <circle cx="10.5" cy="10.5" r="6.5"></circle><path d="M15.5 15.5L21 21"></path>
+  {:else if name === 'trends'}
+    <path d="M4 20V10M10 20V4M16 20v-7M22 20H2"></path>
   {:else if name === 'jobs'}
     <path d="M4 6h16M4 12h10M4 18h7"></path><circle cx="18" cy="16" r="3"></circle>
   {:else if name === 'settings'}

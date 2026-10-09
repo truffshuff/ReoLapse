@@ -35,6 +35,8 @@ export const api = {
   nvr: () => request('GET', '/api/nvr'),
   saveNvr: (login) => request('PUT', '/api/nvr', login),
   models: () => request('GET', '/api/models'),
+  trends: (q) => request('GET', `/api/trends?${new URLSearchParams(q)}`),
+  search: (q) => request('GET', `/api/search?${new URLSearchParams(q)}`),
   correct: (day, cam, id, value) =>
     request('PUT', `/api/days/${day}/${encodeURIComponent(cam)}/objects/${encodeURIComponent(id)}/correction`, { value }),
   nightly: (preview = false) => request('GET', `/api/nightly${preview ? '?preview=1' : ''}`),

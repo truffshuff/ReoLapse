@@ -25,6 +25,8 @@
   const synZoom = new Zoom();
   const origZoom = new Zoom();
   let meta = $state(null); // the video's sidecar: timing and the settings it was made with
+  let pendingT = $state(params.t != null ? Number(params.t) : null); // opened at a time (from Search)
+  let synReady = $state(false); // the synopsis video's metadata has loaded (it can seek)
   let length = $state(0); // synopsis seconds that span the 24 h day (from the render's sidecar)
   let synTime = $state(0);
   let originalAt = $state('12:00');
@@ -182,6 +184,7 @@
     if (!videoName) return;
     length = 0;
     meta = null;
+    synReady = false;
     synState = 'loading';
     fetch(media.out(day, camera, videoName.replace(/\.mp4$/, '.json')))
       .then((r) => (r.ok ? r.json() : null))
@@ -191,7 +194,16 @@
 
   function onMeta() {
     if (!length && synVideo?.duration) length = synVideo.duration;
+    synReady = true;
   }
+
+  // Opened from a search result: jump there (and show the original footage) once the video is ready.
+  $effect(() => {
+    if (pendingT == null || !length || !synVideo || !synReady || !info) return;
+    const t = pendingT;
+    pendingT = null;
+    jumpTo(t);
+  });
 
   // The graph's scale: a round top value with an integer midpoint (2, 4, 6, 8, 10, 20, 40…).
   function niceMax(m) {

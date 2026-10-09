@@ -8,6 +8,8 @@
   import Jobs from './views/Jobs.svelte';
   import Settings from './views/Settings.svelte';
   import Report from './views/Report.svelte';
+  import Search from './views/Search.svelte';
+  import Trends from './views/Trends.svelte';
   import { api, onJobEvents } from './lib/api.js';
   import { jobState } from './lib/busy.svelte.js';
 
@@ -16,6 +18,8 @@
     { id: 'player', label: 'Player' },
     { id: 'multi', label: 'All cameras' },
     { id: 'insights', label: 'Insights' },
+    { id: 'search', label: 'Search' },
+    { id: 'trends', label: 'Trends' },
     { id: 'jobs', label: 'Jobs' },
     { id: 'settings', label: 'Settings' },
   ];
@@ -73,6 +77,8 @@
       {:else if route.view === 'jobs'}<Jobs />
       {:else if route.view === 'settings'}<Settings />
       {:else if route.view === 'report'}<Report params={route.params} />
+      {:else if route.view === 'search'}<Search params={route.params} />
+      {:else if route.view === 'trends'}<Trends params={route.params} />
       {/if}
     {/key}
   </main>

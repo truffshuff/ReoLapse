@@ -667,3 +667,34 @@ def test_memory_reading():
     from reolapse.analyze import memory_limit, memory_used
     used = memory_used()
     assert used and 10e6 < used < 64e9 and memory_limit() > 1e9
+
+
+def test_trends_and_search_across_days(env):
+    import pickle
+    from datetime import date
+    from reolapse import settings as settings_mod, tube_index
+    from reolapse.config import DayPaths
+
+    def day(d, objs):
+        p = DayPaths("Garage", date.fromisoformat(d))
+        p.tubes_out.mkdir(parents=True)
+        metas = []
+        for t0, cat, x in objs:
+            frames = [(t0 + k, x, 10, x + 20, 50, b"png") for k in range(10)]
+            name = f"{t0:08.1f}_{cat}.pkl"
+            (p.tubes_out / name).write_bytes(pickle.dumps({"t0": t0, "t1": t0 + 9, "category": cat, "frames": frames}))
+            metas.append(tube_index.tube_meta(name, t0, t0 + 9, cat, [f[:5] for f in frames]))
+        tube_index.write(p.tubes_out, metas, (200, 100))
+    day("2026-10-08", [(23 * 3600, "person", 10), (12 * 3600, "vehicle", 150)])
+    day("2026-10-09", [(2 * 3600, "person", 10), (2 * 3600 + 60, "animal", 150)])
+    settings_mod.save({"cameras": ["Garage"], "areas": {"Garage": [{"name": "Left", "boxes": [{"x0": 0, "y0": 0, "x1": 0.5, "y1": 1}]}]}})
+    with TestClient(create_app(JobQueue(fake_command))) as client:
+        t = client.get("/api/trends", params={"start": "2026-10-01", "end": "2026-10-31"}).json()
+        assert t["days"] == ["2026-10-08", "2026-10-09"]
+        assert t["data"]["Garage"]["2026-10-09"]["counts"] == {"person": 1, "vehicle": 0, "animal": 1}
+        assert t["areas"][0]["days"]["2026-10-08"]["person"] == 1 and t["areas"][0]["days"]["2026-10-08"]["vehicle"] == 0
+        night = client.get("/api/search", params={"after": "22:00", "before": "05:00", "types": "person"}).json()
+        assert [(o["day"], o["category"]) for o in night["objects"]] == [("2026-10-09", "person"), ("2026-10-08", "person")]
+        left = client.get("/api/search", params={"area": "Garage|0"}).json()
+        assert left["area"] == "Left" and {o["category"] for o in left["objects"]} == {"person"}
+        assert client.get("/api/search", params={"area": "Garage|5"}).status_code == 400

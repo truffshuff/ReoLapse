@@ -473,6 +473,96 @@ def create_app(queue: JobQueue | None = None, updater=None) -> FastAPI:
                  for f in sorted(present - known)]
         return [{**m, "downloaded": m["file"] in present} for m in MODEL_CATALOG + extra]
 
+    # ---------------------------------------------------------------- across days
+    def _range(start: str, end: str, cameras: str) -> tuple[list[str], list[str]]:
+        cams = [_check_camera(c) for c in cameras.split(",") if c] or settings_mod.load()["cameras"]
+        lo, hi = sorted((_check_day(start), _check_day(end))) if start and end else ("0000-00-00", "9999-99-99")
+        days = sorted(d for d in library._list_days(cams) if lo <= d <= hi)
+        return days, cams
+
+    def _reviewed_index(camera: str, day: str):
+        paths = DayPaths(camera, date.fromisoformat(day))
+        if not paths.tubes.is_dir():
+            return None
+        index = _tube_index(paths)
+        return index and review.apply(index, review.load_corrections(paths.tubes), review.zones_for(camera))
+
+    @app.get("/api/trends")
+    async def trends(start: str = "", end: str = "", cameras: str = ""):
+        """Per camera and day: counts and objects per hour by type; per saved report area: counts by day."""
+        from .. import tube_index
+
+        days, cams = _range(start, end, cameras)
+
+        def collect():
+            data = {c: {} for c in cams}
+            for c in cams:
+                for d in days:
+                    info = library.camera_day(c, d)
+                    if info["analyzed"]:
+                        data[c][d] = {"counts": info["counts"], "hourly_by": info["hourly_by"], "status": info["status"]}
+            areas = []
+            for c, defined in settings_mod.load()["areas"].items():
+                if c not in cams:
+                    continue
+                for a in defined:
+                    per_day = {}
+                    for d in days:
+                        index = _reviewed_index(c, d) if d in data[c] else None
+                        if index:
+                            cnt = {"person": 0, "vehicle": 0, "animal": 0}
+                            for o in tube_index.query(index, [(b["x0"], b["y0"], b["x1"], b["y1"]) for b in a["boxes"]]):
+                                cnt[o["category"]] = cnt.get(o["category"], 0) + 1
+                            per_day[d] = cnt
+                    areas.append({"camera": c, "name": a["name"], "days": per_day})
+            return {"days": days, "cameras": cams, "data": data, "areas": areas}
+
+        return await asyncio.to_thread(collect)
+
+    @app.get("/api/search")
+    async def search(start: str = "", end: str = "", cameras: str = "", types: str = "", after: str = "",
+                     before: str = "", area: str = "", min_seconds: float = 0, limit: int = 600):
+        """Objects across days: by camera, type, time of day (after/before "HH:MM", may wrap past
+        midnight), a saved report area ("camera|index"), and how long they were on camera."""
+        from .. import tube_index
+
+        days, cams = _range(start, end, cameras)
+        cats = {t for t in types.split(",") if t} or None
+        clock_s = lambda v: int(v[:2]) * 3600 + int(v[3:5]) * 60 if re.fullmatch(r"\d\d:\d\d", v or "") else None
+        lo, hi = clock_s(after), clock_s(before)
+        regions, area_name = None, ""
+        if area:
+            cam, _, i = area.rpartition("|")
+            defined = settings_mod.load()["areas"].get(cam, [])
+            if not i.isdigit() or int(i) >= len(defined):
+                raise HTTPException(400, "no such area")
+            cams, a = [cam], defined[int(i)]
+            regions, area_name = [(b["x0"], b["y0"], b["x1"], b["y1"]) for b in a["boxes"]], a["name"]
+
+        def in_window(t: float) -> bool:
+            t = t % 86400
+            if lo is None and hi is None:
+                return True
+            if lo is not None and hi is not None and lo > hi:  # e.g. 22:00 to 05:00
+                return t >= lo or t < hi
+            return (lo is None or t >= lo) and (hi is None or t < hi)
+
+        def collect():
+            found, total = [], 0
+            for d in sorted(days, reverse=True):  # newest first
+                for c in cams:
+                    index = _reviewed_index(c, d)
+                    if not index:
+                        continue
+                    for o in tube_index.query(index, regions or [(0, 0, 1, 1)], cats):
+                        if in_window(o["enter"]) and o["t1"] - o["t0"] >= min_seconds:
+                            total += 1
+                            if len(found) < limit:
+                                found.append({**o, "day": d, "camera": c})
+            return {"total": total, "shown": len(found), "area": area_name, "objects": found}
+
+        return await asyncio.to_thread(collect)
+
     # ---------------------------------------------------------------- nightly run & storage
     @app.get("/api/nightly")
     async def nightly(preview: bool = False):
