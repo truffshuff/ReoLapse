@@ -18,8 +18,8 @@ DEFAULTS: dict = {
                "max_tube": 20.0, "per_type": [],  # per_type: extra videos of only people/vehicles/animals
                "clock": "adaptive",  # "even": one clock rate all day; "adaptive": busy times get more video
                "second_clock": True},  # also the first style with the other clock, to switch in the Player
-    "retention": {"raw_days": 14, "results_days": 90},
-    "nightly": {"enabled": False, "time": "02:00"},
+    "retention": {"raw_days": 14, "results_days": 90, "auto": False},  # auto: clean up after each nightly run
+    "nightly": {"enabled": False, "time": "02:00", "catch_up_days": 3},
     "storage": {"work_root": "", "data_root": ""},  # empty = defaults (REOLAPSE_WORK / REOLAPSE_DATA override)
     "nvr": {"host": "", "user": "", "port": 80},  # the password lives in the system keychain, never here
     "updates": {"repo": "truffshuff/ReoLapse", "check_on_launch": True},  # token: system keychain

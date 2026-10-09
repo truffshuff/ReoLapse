@@ -490,3 +490,84 @@ def test_report_areas_in_settings(env):
         settings_mod.save({"areas": {"Garage": [{"name": "x", "boxes": [{"x0": 0, "y0": 0, "x1": 2, "y1": 1}]}]}})
     with pytest.raises(ValueError):
         settings_mod.save({"areas": {"Garage": [{"name": "", "boxes": [area["boxes"][0]]}]}})
+
+
+def test_cleanup_plan_follows_retention(env, tmp_path, monkeypatch):
+    import os
+    import time as _time
+    from datetime import date, timedelta
+    from reolapse import cleanup, config, settings as settings_mod
+
+    monkeypatch.setattr(config, "WORK_ROOT", config.DATA_ROOT)
+    settings_mod.save({"cameras": ["Garage"]})
+    today = date(2026, 10, 20)
+
+    def day(n, rendered=False, raw=("main_1.mp4",), listed=("main_1.mp4",)):
+        d = config.DATA_ROOT / "garage" / (today - timedelta(days=n)).isoformat()
+        (d / "raw").mkdir(parents=True)
+        for f in raw:
+            (d / "raw" / f).write_bytes(b"x" * 1000)
+        (d / "files.json").write_text(json.dumps([{"path": f} for f in listed]))
+        if rendered:
+            (d / "out").mkdir()
+            (d / "out" / "synopsis_cutout_category.mp4").write_bytes(b"v")
+        return d
+
+    old_done = day(20, rendered=True)          # raw past 14 days, rendered: raw goes
+    old_todo = day(21)                         # raw past 14 days, never rendered: kept
+    ancient = day(100, rendered=True)          # past 90 days: everything goes
+    mixed = day(2, rendered=True, raw=("main_1.mp4", "sub_1.mp4", "main_2.mp4.part"))  # Fluent left over
+    os.utime(mixed / "raw" / "main_2.mp4.part", (_time.time() - 2 * 86400,) * 2)
+    busy = day(25, rendered=True)              # has a queued job: untouched
+
+    p = cleanup.plan({"raw_days": 14, "results_days": 90}, protected={("garage", busy.name)}, today=today)
+    got = {(i.reason, i.path.relative_to(config.DATA_ROOT).as_posix()) for i in p.items}
+    assert ("raw", f"garage/{old_done.name}/raw") in got
+    assert ("results", f"garage/{ancient.name}") in got
+    assert ("superseded", f"garage/{mixed.name}/raw/sub_1.mp4") in got
+    assert ("leftover", f"garage/{mixed.name}/raw/main_2.mp4.part") in got
+    assert not any(old_todo.name in path or busy.name in path for _, path in got)
+    assert not any(path.endswith("main_1.mp4") for _, path in got)
+    cleanup.execute(p, log=lambda *_: None)
+    assert not (old_done / "raw").exists() and (old_done / "out").exists() and not ancient.exists()
+    assert (old_todo / "raw" / "main_1.mp4").exists() and (busy / "raw").exists()
+
+
+def test_nightly_queues_what_each_day_needs(env, monkeypatch):
+    from datetime import date, datetime
+    from reolapse import settings as settings_mod
+    from reolapse.server import library
+    from reolapse.server.scheduler import Scheduler
+
+    settings_mod.save({"cameras": ["Garage", "Porch Left"], "nightly": {"enabled": True, "time": "02:00", "catch_up_days": 2}})
+    status = {("Garage", "2026-10-19"): "empty", ("Porch Left", "2026-10-19"): "analyzed",
+              ("Garage", "2026-10-18"): "rendered", ("Porch Left", "2026-10-18"): "fetched"}
+    monkeypatch.setattr(library, "camera_day", lambda c, d, fresh=False: {"status": status[(c, d)]})
+    q = JobQueue(fake_command)
+    q.paused = True
+    s = Scheduler(q, q.state_dir)
+    assert s.due(datetime(2026, 10, 20, 2, 30)) and not s.due(datetime(2026, 10, 20, 1, 30))
+    work = s.plan_days(date(2026, 10, 20))
+    assert {(w["kind"], w["day"], tuple(w["cameras"])) for w in work} == {
+        ("run", "2026-10-19", ("Garage",)), ("render", "2026-10-19", ("Porch Left",)), ("run", "2026-10-18", ("Porch Left",))}
+    q.submit("render", "2026-10-19", ["Porch Left"])  # already queued: not queued again
+    assert all(w["day"] != "2026-10-19" or "Porch Left" not in w["cameras"] for w in s.plan_days(date(2026, 10, 20)))
+
+
+def test_cleanup_removes_local_copies_already_on_the_share(env, tmp_path, monkeypatch):
+    from datetime import date, timedelta
+    from reolapse import cleanup, config, settings as settings_mod
+    from reolapse.config import DayPaths
+
+    monkeypatch.setattr(config, "WORK_ROOT", tmp_path / "work")
+    settings_mod.save({"cameras": ["Garage"]})
+    today = date(2026, 10, 20)
+    for n in (1, 5):
+        p = DayPaths("Garage", today - timedelta(days=n))
+        p.out.mkdir(parents=True)
+        p.published.mkdir(parents=True)
+        for f, same in (("synopsis_cutout_category.mp4", True), ("trails.jpg", False)):
+            (p.out / f).write_bytes(b"v" * 10)
+            (p.published / f).write_bytes(b"v" * (10 if same else 9))  # trails differs: not a copy yet
+    items = cleanup.plan({"raw_days": 14, "results_days": 90}, today=today).items
+    assert [(i.reason, i.path.name, i.day) for i in items] == [("localcopy", "synopsis_cutout_category.mp4", (today - timedelta(days=5)).isoformat())]

@@ -38,7 +38,8 @@
     density: 'Sets the automatic video length: roughly how many objects are on screen at once. Higher makes a shorter, busier video.',
     raw: 'Downloaded recordings are the biggest files (about 5–21 GB per camera per day). Days older than this would be deleted; the finished videos and stills are kept separately.',
     results: 'How long finished videos, stills and the object data behind them are kept.',
-    nightly: 'Downloads and processes the previous day for every included camera, starting at this time.',
+    nightly: 'At this time each night, Reolapse queues yesterday for every included camera: the whole pipeline for a day with nothing yet, just a render for a day already analyzed, nothing for a day that\'s done. It also catches up on the few days before that, and if the Mac was off or asleep at that time it runs the next time Reolapse is open. Turn it on in one Mac only.',
+    cleanup: 'Deletes what the limits above allow: downloaded footage older than the raw limit once that day has been rendered (footage that was never processed is kept), footage of the other stream after a day was downloaded again (for example Fluent files after a Clear download), leftovers of interrupted downloads, and everything for days older than the results limit. Days with a queued or running job are never touched.',
     cameras: 'Only fixed cameras work for synopsis: the background has to stay still. Tracking (pan/zoom) lenses are flagged.',
     stream: 'Fluent is the camera\'s low-resolution sub stream: small and quick, about 100x real time to process (Garage 1920×576, ~5 GB a day). Clear is the full-resolution main stream: much sharper cutouts, but far bigger and slower: Garage 5120×1552 is ~36 GB and ~45 min of downloading a day, Porch Left 4K is ~89 GB and ~1.7 h, and a whole-day scan takes about 3 hours per camera even on the hardware decoder. Clear frames are scaled to 2560 px wide for processing. A change applies the next time a day is downloaded; that day is then re-analyzed in the new stream.',
     perType: 'Each switch adds one more video per camera and day, in the first style above, containing only that kind of object. With fewer objects they are shorter, less crowded and quicker to render than the full video. The Player switches between them with Show.',
@@ -82,6 +83,32 @@
   }
 
   let upd = $state(null);
+  let night = $state(null);
+  let store = $state(null);
+  let storeBusy = $state('');
+  const gb = (b) => (b == null ? '–' : b >= 1e12 ? `${(b / 1e12).toFixed(2)} TB` : `${(b / 1e9).toFixed(1)} GB`);
+
+  async function loadStorage(refresh = false) {
+    storeBusy = 'Checking…';
+    try { store = await api.storage(refresh); } catch (e) { storeBusy = `Couldn't check: ${e.message}`; return; }
+    storeBusy = '';
+  }
+
+  async function cleanNow() {
+    if (!confirm(`Delete ${gb(store?.would_free)} now? This can't be undone.`)) return;
+    storeBusy = 'Cleaning up…';
+    try {
+      const r = await api.cleanup();
+      storeBusy = r.busy ? 'A cleanup is already running.' : `Freed ${gb(r.freed)}.`;
+      store = await api.storage(true);
+    } catch (e) {
+      storeBusy = `Cleanup failed: ${e.message}`;
+    }
+  }
+
+  async function runNightNow() {
+    night = await api.nightlyRun();
+  }
   let token = $state('');
   let updMsg = $state('');
   let checking = $state(false);
@@ -124,6 +151,8 @@
 
   onMount(async () => {
     [s, health, nvr, models, upd] = await Promise.all([api.settings(), api.health(), api.nvr(), api.models(), api.update()]);
+    api.nightly(true).then((n) => (night = n)).catch(() => {});
+    loadStorage();
     setLoginFrom(nvr);
     saved = structuredClone($state.snapshot(s));
   });
@@ -325,14 +354,59 @@
             <input id="res-days" type="number" min="1" bind:value={s.retention.results_days} />
           </div>
         </div>
-        <p class="desc">Automatic cleanup isn't active yet.</p>
+        <div class="disks">
+          {#each [['Archive', store?.archive], ...(store?.same ? [] : [['Working folder', store?.work]])] as [label, d]}
+            {#if d}
+              <div class="disk">
+                <div class="row small"><span>{label}</span><span class="muted push">{gb(d.free)} free of {gb(d.total)}</span></div>
+                <div class="meter" class:low={d.free / d.total < 0.1}><div style:width="{(d.used / d.total) * 100}%"></div></div>
+              </div>
+            {/if}
+          {/each}
+        </div>
+        <div class="row"><h3 class="sub-h">Cleanup</h3><InfoTip text={HELP.cleanup} /></div>
+        {#if store}
+          {#if store.items.length}
+            <ul class="clean-list">
+              {#each store.items as it}
+                <li><span>{it.label}</span><span class="muted">{it.days.length ? `${it.days.length} day${it.days.length === 1 ? '' : 's'} · ` : ''}{gb(it.bytes)}</span></li>
+              {/each}
+            </ul>
+          {:else}
+            <p class="desc">Nothing to clean up under these limits.</p>
+          {/if}
+        {/if}
+        <div class="row">
+          <button class="btn" onclick={cleanNow} disabled={!store?.would_free || !!storeBusy}>Clean up now{store?.would_free ? ` (${gb(store.would_free)})` : ''}</button>
+          <button class="btn quiet" onclick={() => loadStorage(true)} disabled={!!storeBusy}>Check again</button>
+          {#if storeBusy}<span class="small muted">{storeBusy}</span>{/if}
+        </div>
+        <Switch label="Clean up automatically after each nightly run" bind:checked={s.retention.auto} />
+        {#if store?.last_cleanup}<p class="desc">Last cleanup {store.last_cleanup.at.replace('T', ' ')}: freed {gb(store.last_cleanup.freed)}.</p>{/if}
+        <p class="desc">Changed limits apply after <strong>Save changes</strong>; then <strong>Check again</strong>.</p>
       </section>
 
       <section class="panel" aria-labelledby="ni-h">
         <div class="row"><h2 id="ni-h">Nightly run</h2><InfoTip text={HELP.nightly} /></div>
         <Switch label="Process yesterday automatically" bind:checked={s.nightly.enabled} />
-        <div class="field"><label for="night-time">Start at</label><input id="night-time" type="time" bind:value={s.nightly.time} disabled={!s.nightly.enabled} /></div>
-        <p class="desc">Saved now; the scheduler that acts on it arrives in a later update.</p>
+        <div class="cols2 inner">
+          <div class="field"><label for="night-time">Start at</label><input id="night-time" type="time" bind:value={s.nightly.time} disabled={!s.nightly.enabled} /></div>
+          <div class="field"><label for="catch-up">Also catch up on (days before)</label>
+            <input id="catch-up" type="number" min="1" max="14" bind:value={s.nightly.catch_up_days} disabled={!s.nightly.enabled} /></div>
+        </div>
+        {#if night}
+          <p class="desc">
+            {#if night.enabled && night.next_run}Next run {new Date(night.next_run).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })}.{/if}
+            {#if night.last_run}Last run {night.last_run}{night.last_queued?.length ? `: queued ${night.last_queued.join('; ')}` : ': nothing needed doing'}.{/if}
+          </p>
+          {#if night.would_queue?.length}
+            <p class="desc">Right now it would queue: {night.would_queue.map((w) => `${w.day} ${w.kind === 'run' ? 'everything' : w.kind} (${w.cameras.join(', ')})`).join('; ')}.</p>
+          {:else if night.would_queue}
+            <p class="desc">Right now every recent day is done or already queued.</p>
+          {/if}
+        {/if}
+        <div class="row"><button class="btn" onclick={runNightNow} disabled={!night?.would_queue?.length}>Queue it now</button></div>
+        <p class="desc">Turn this on in one Mac only: two Macs sharing the archive would both queue the same days.</p>
       </section>
 
       <section class="panel" id="updates" aria-labelledby="up-h">
@@ -419,6 +493,12 @@
   .inline { display: flex; gap: 10px; }
   .inline input { flex: 1; min-width: 0; }
   input[type=range] { width: 100%; }
+  .disks { display: flex; flex-direction: column; gap: 10px; }
+  .meter { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; margin-top: 4px; }
+  .meter div { height: 100%; background: var(--accent); }
+  .meter.low div { background: var(--warn); }
+  .clean-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+  .clean-list li { display: flex; justify-content: space-between; gap: 12px; }
   .update { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; }
   .notes { white-space: pre-wrap; max-height: 160px; overflow: auto; }
   .bad-text { color: var(--bad); }

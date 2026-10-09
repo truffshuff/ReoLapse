@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import re
+import time
 from contextlib import asynccontextmanager
 from datetime import date
 
@@ -135,9 +136,15 @@ def create_app(queue: JobQueue | None = None, updater=None) -> FastAPI:
     queue = queue or JobQueue()
     updater = updater or Updater(lambda: settings_mod.load()["updates"]["repo"])
 
+    from .scheduler import Scheduler
+
+    scheduler = Scheduler(queue, queue.state_dir)
+    storage_cache: dict = {}
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         queue.start()
+        queue._spawn(scheduler.loop())
         yield
         await queue.stop()
 
@@ -436,6 +443,42 @@ def create_app(queue: JobQueue | None = None, updater=None) -> FastAPI:
         extra = [{"file": f, "name": f, "speed": "", "about": "Custom model found in models/."}
                  for f in sorted(present - known)]
         return [{**m, "downloaded": m["file"] in present} for m in MODEL_CATALOG + extra]
+
+    # ---------------------------------------------------------------- nightly run & storage
+    @app.get("/api/nightly")
+    async def nightly(preview: bool = False):
+        """When the nightly run happens and what it last did; preview=1 adds what it would queue now."""
+        out = scheduler.status()
+        if preview:
+            out["would_queue"] = await asyncio.to_thread(scheduler.plan_days)
+        return out
+
+    @app.post("/api/nightly/run")
+    async def nightly_run():
+        """Do tonight's run now: queue the days that need work (and clean up, if that's on)."""
+        return await scheduler.run_now()
+
+    @app.get("/api/storage")
+    async def storage(refresh: bool = False):
+        """Free space on the archive and working folders, and what the cleanup would delete."""
+        from .. import cleanup
+
+        hit = storage_cache.get("v")
+        if hit and not refresh and time.time() - hit["scanned"] < 600:
+            return hit
+        protected = {(config.slug(c), d) for c, d in scheduler.busy_days()}
+        p = await asyncio.to_thread(cleanup.plan, settings_mod.load()["retention"], protected)
+        v = {"scanned": time.time(), "archive": cleanup.disk(config.DATA_ROOT), "work": cleanup.disk(config.WORK_ROOT),
+             "same": config.DATA_ROOT.resolve() == config.WORK_ROOT.resolve(), "would_free": p.bytes,
+             "items": p.summary(), "last_cleanup": scheduler.state.get("last_cleanup")}
+        storage_cache["v"] = v
+        return v
+
+    @app.post("/api/storage/cleanup")
+    async def storage_cleanup():
+        out = await scheduler.clean()
+        storage_cache.clear()
+        return out
 
     # ---------------------------------------------------------------- updates
     @app.get("/api/update")

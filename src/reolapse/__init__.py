@@ -62,6 +62,8 @@ def main() -> None:
     _common(sub.add_parser("probe", help="check NVR access and what a day's events look like"))
     pr = sub.add_parser("prune", help="set aside objects that never really moved (for days analyzed before this check)")
     _common(pr)
+    cl = sub.add_parser("cleanup", help="delete what the retention settings allow (old footage, results, leftovers)")
+    cl.add_argument("--dry-run", action="store_true", help="only list what would be deleted")
     sv = sub.add_parser("serve", help="run the local API server for the desktop app")
     sv.add_argument("--host", default="127.0.0.1")
     sv.add_argument("--port", type=int, default=8765)
@@ -80,6 +82,18 @@ def main() -> None:
     if args.cmd == "serve":
         from .server import serve
         serve(args.host, args.port)
+        return
+    if args.cmd == "cleanup":
+        from . import cleanup
+        from .settings import load
+
+        p = cleanup.plan(load()["retention"])
+        for i in p.items:
+            print(f"   {'would delete' if args.dry_run else 'delete'} {i.path}  ({i.bytes / 1e9:.2f} GB, {i.reason})")
+        if args.dry_run:
+            print(f"{len(p.items)} item(s), {p.bytes / 1e9:.1f} GB would be freed")
+        else:
+            print(f"freed {cleanup.execute(p) / 1e9:.1f} GB")
         return
     cameras = args.camera or DEFAULT_CAMERAS
     day = _day(args.day)
