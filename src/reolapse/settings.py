@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 import os
 from pathlib import Path
 
@@ -27,10 +28,11 @@ DEFAULTS: dict = {
     "areas": {},  # camera name -> [{"name": "Driveway", "boxes": [{"x0": .., "y0": .., "x1": .., "y1": ..}]}]
     "ignore": {},  # camera name -> [{"x0": .., "y0": .., "x1": .., "y1": ..}]: zones where nothing counts
     "camera_analysis": {},  # camera name -> {"model"?, "imgsz"?, "fps"?}: overrides of "analysis" for that camera
+    "kept": {},  # "YYYY-MM-DD" -> note: days the cleanup never deletes
 }
 
 # Settings whose keys are user data (camera names), not a fixed schema.
-FREE_FORM = {"streams", "areas", "ignore", "camera_analysis"}
+FREE_FORM = {"streams", "areas", "ignore", "camera_analysis", "kept"}
 
 
 def _check_box(b, what: str) -> None:
@@ -67,6 +69,10 @@ def _merge(base: dict, patch: dict, path: str = "") -> dict:
                 raise ValueError("streams values must be 'sub' (Fluent) or 'main' (Clear)")
             if key == "areas":
                 _check_areas(value)
+            if key == "kept":
+                for day, note in value.items():
+                    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(day)) or not isinstance(note, str) or len(note) > 200:
+                        raise ValueError("kept days are YYYY-MM-DD with a note of at most 200 characters")
             if key == "camera_analysis":
                 for camera, o in value.items():
                     if not isinstance(o, dict) or set(o) - {"model", "imgsz", "fps"}:

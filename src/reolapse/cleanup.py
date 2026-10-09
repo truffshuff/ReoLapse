@@ -11,7 +11,9 @@ Rules (days counted from today, by the day the footage is from):
   share has an identical copy (recent days stay local, where they play faster);
 - the working folder's picture cache and set-aside folders older than 30 days.
 
-Days with a queued or running job are never touched. `plan()` only looks; `execute()` deletes.
+Days with a queued or running job are never touched, and nor are days marked to keep (Settings
+"kept"), except for this Mac's duplicate copies of their finished outputs (the share keeps them).
+`plan()` only looks; `execute()` deletes.
 """
 
 from __future__ import annotations
@@ -108,9 +110,15 @@ def _camera_dirs() -> dict[str, str]:
     return names
 
 
-def plan(retention: dict, protected: set[tuple[str, str]] = frozenset(), today: date | None = None) -> Plan:
-    """What may be deleted. `protected`: (camera slug, day) pairs with queued or running jobs."""
+def plan(retention: dict, protected: set[tuple[str, str]] = frozenset(), today: date | None = None,
+         kept: set[str] | None = None) -> Plan:
+    """What may be deleted. `protected`: (camera slug, day) pairs with queued or running jobs;
+    `kept`: days never to delete (default: Settings "kept")."""
     today = today or date.today()
+    if kept is None:
+        from .settings import load
+
+        kept = set(load().get("kept", {}))
     raw_days, results_days = int(retention["raw_days"]), int(retention["results_days"])
     out = Plan()
     for cslug, camera in _camera_dirs().items():
@@ -125,7 +133,8 @@ def plan(retention: dict, protected: set[tuple[str, str]] = frozenset(), today: 
             age = _age_days(day, today)
             paths = DayPaths(camera, date.fromisoformat(day))
             roots = [r / cslug / day for r in {config.DATA_ROOT, config.WORK_ROOT} if (r / cslug / day).is_dir()]
-            if age > results_days:
+            keep = day in kept
+            if age > results_days and not keep:
                 for r in roots:
                     out.items.append(Item(r, size_of(r), "results", day, camera))
                 continue
@@ -139,7 +148,7 @@ def plan(retention: dict, protected: set[tuple[str, str]] = frozenset(), today: 
                     except OSError:
                         pass
             raw = paths.raw
-            if not raw.is_dir():
+            if not raw.is_dir() or keep:
                 continue
             if age > raw_days and _rendered(paths):
                 out.items.append(Item(raw, size_of(raw), "raw", day, camera))

@@ -192,7 +192,7 @@
     message = '';
     try {
       // the login is saved by Save login, and report areas by the report page
-      const { nvr: _login, areas: _areas, ...patch } = $state.snapshot(s);
+      const { nvr: _login, areas: _areas, kept: _kept, ...patch } = $state.snapshot(s); // kept: Today's ★
       const out = await api.saveSettings(patch);
       s = out;
       saved = structuredClone(out);
@@ -455,6 +455,18 @@
           {#if storeBusy}<span class="small muted">{storeBusy}</span>{/if}
         </div>
         <Switch label="Clean up automatically after each nightly run" bind:checked={s.retention.auto} />
+        <div class="row"><h3 class="sub-h">Kept days</h3>
+          <InfoTip text="Days marked ★ Keep on the Today page: the cleanup never deletes their footage or results, whatever the limits say." /></div>
+        {#if Object.keys(s.kept ?? {}).length}
+          <ul class="clean-list">
+            {#each Object.entries(s.kept).sort((a, b) => b[0].localeCompare(a[0])) as [day, why]}
+              <li><span>★ {day}{why ? ` · ${why}` : ''}</span>
+                <button class="btn quiet mini" onclick={async () => { s.kept = await api.releaseDay(day); saved.kept = { ...s.kept }; loadStorage(true); }}>Release</button></li>
+            {/each}
+          </ul>
+        {:else}
+          <p class="desc">None. Use ☆ Keep this day on the Today page for days worth keeping, such as one with an incident.</p>
+        {/if}
         {#if store?.last_cleanup}<p class="desc">Last cleanup {store.last_cleanup.at.replace('T', ' ')}: freed {gb(store.last_cleanup.freed)}.</p>{/if}
         <p class="desc">Changed limits apply after <strong>Save changes</strong>; then <strong>Check again</strong>.</p>
       </section>

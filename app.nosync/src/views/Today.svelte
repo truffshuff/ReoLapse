@@ -10,10 +10,30 @@
   let loaded = $state(false);
 
   const current = $derived(days[index]);
+  let kept = $state({}); // day -> note: days the storage cleanup never deletes
+  let note = $state('');
+  let editingNote = $state(false);
+  const isKept = $derived(current && current.day in kept);
+
+  async function toggleKeep() {
+    if (isKept) {
+      kept = await api.releaseDay(current.day);
+      editingNote = false;
+    } else {
+      kept = await api.keepDay(current.day, '');
+      note = '';
+      editingNote = true; // offer a note right away
+    }
+  }
+
+  async function saveNote() {
+    kept = await api.keepDay(current.day, note);
+    editingNote = false;
+  }
 
   async function load() {
     try {
-      days = await api.days();
+      [days, kept] = await Promise.all([api.days(), api.settings().then((s) => s.kept ?? {})]);
       error = '';
     } catch (e) {
       error = e.message;
@@ -54,7 +74,21 @@
       <h1>{current ? longDay(current.day) : 'Today'}</h1>
       <div class="muted sub">{current ? summary(current) : ' '}</div>
     </div>
-    {#if current}<a class="btn push" href={`#/report?day=${current.day}`}>PDF report</a>{/if}
+    {#if current}
+      <div class="push keep">
+        {#if editingNote}
+          <input type="text" bind:value={note} maxlength="200" placeholder="Why keep it? (optional)" aria-label="Note for this day"
+                 onkeydown={(e) => e.key === 'Enter' && saveNote()} />
+          <button class="btn" onclick={saveNote}>Save note</button>
+        {:else if isKept && kept[current.day]}
+          <span class="small muted" title="Note">{kept[current.day]}</span>
+        {/if}
+        <button class="btn" class:on={isKept} aria-pressed={isKept} onclick={toggleKeep}
+                title={isKept ? 'Kept: storage cleanup never deletes this day. Click to release it.' : 'Keep this day: storage cleanup will never delete its footage or results'}>
+          {isKept ? '★ Kept' : '☆ Keep this day'}</button>
+      </div>
+      <a class="btn" href={`#/report?day=${current.day}`}>PDF report</a>
+    {/if}
     <a class="btn primary" class:push={!current} href="#/jobs">Process a day</a>
   </header>
 
@@ -111,7 +145,7 @@
           <button class:sel={i === index} onclick={() => (index = i)}>
             <span class="muted small">{sd.dow}</span>
             <span class="date">{sd.date}</span>
-            <span class="small dim">{summary(d)}</span>
+            <span class="small dim">{summary(d)}{d.day in kept ? ' · ★ kept' : ''}</span>
           </button>
         {/each}
       </div>
@@ -123,6 +157,9 @@
   .page { padding: 28px 36px 40px; display: flex; flex-direction: column; gap: 28px; }
   header { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
   .nav-btns { display: flex; gap: 8px; }
+  .keep { display: flex; align-items: center; gap: 8px; }
+  .keep input { width: 220px; }
+  .keep .btn.on { border-color: var(--warn); color: var(--warn); }
   h1 { font-size: 26px; font-weight: 600; }
   .sub { font-size: 14px; }
   .push { margin-left: auto; }

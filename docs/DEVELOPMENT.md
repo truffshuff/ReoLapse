@@ -153,6 +153,7 @@ progress; with `REOLAPSE_PROGRESS=json` it also prints `@@{json}` progress lines
 | `GET /api/nightly?preview=`, `POST /api/nightly/run` | nightly schedule, last run, what it would queue; run now |
 | `GET /api/storage?refresh=`, `POST /api/storage/cleanup` | free space, what cleanup would free; clean up now |
 | `GET /api/storage/sharing`, `POST /api/storage/share` | days this Mac has that the share doesn't; copy them |
+| `PUT /api/kept/{day}` `{"note"}`, `DELETE /api/kept/{day}` | days the cleanup never deletes (`settings.kept`) |
 | `GET/POST /api/jobs`, `GET /api/jobs/{id}`, `…/log` | queue (kind `run` becomes three jobs), status, full log file |
 | `POST /api/jobs/{id}/cancel`, `…/retry`, `…/move?delta=±1` | cancel, retry, reorder |
 | `DELETE /api/jobs/{id}`, `DELETE /api/jobs` | remove one finished job, or all of them (with logs) |

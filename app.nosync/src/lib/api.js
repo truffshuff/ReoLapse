@@ -43,6 +43,8 @@ export const api = {
   nightlyRun: () => request('POST', '/api/nightly/run'),
   storage: (refresh = false) => request('GET', `/api/storage${refresh ? '?refresh=1' : ''}`),
   cleanup: () => request('POST', '/api/storage/cleanup'),
+  keepDay: (day, note = '') => request('PUT', `/api/kept/${day}`, { note }),
+  releaseDay: (day) => request('DELETE', `/api/kept/${day}`),
   sharing: () => request('GET', '/api/storage/sharing'),
   shareNow: () => request('POST', '/api/storage/share'),
   testNvr: () => request('POST', '/api/nvr/test'),

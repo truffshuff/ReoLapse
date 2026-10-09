@@ -52,6 +52,10 @@ class NvrLogin(BaseModel):
     password: str | None = None  # omitted/empty = keep the stored one
 
 
+class KeepBody(BaseModel):
+    note: str | None = None
+
+
 class CorrectionBody(BaseModel):
     value: str | None = None  # person / vehicle / animal / hidden; None undoes the correction
 
@@ -615,6 +619,19 @@ def create_app(queue: JobQueue | None = None, updater=None) -> FastAPI:
             done.append({"camera": p.camera, "day": p.day.isoformat()})
         library._cache.clear()
         return {"shared": done}
+
+    @app.put("/api/kept/{day}")
+    def keep_day(day: str, body: KeepBody):
+        """Mark a day to keep: the cleanup never deletes its footage or results."""
+        kept = {**settings_mod.load().get("kept", {}), _check_day(day): (body.note or "").strip()[:200]}
+        storage_cache.clear()
+        return settings_mod.save({"kept": kept})["kept"]
+
+    @app.delete("/api/kept/{day}")
+    def release_day(day: str):
+        kept = {d: n for d, n in settings_mod.load().get("kept", {}).items() if d != _check_day(day)}
+        storage_cache.clear()
+        return settings_mod.save({"kept": kept})["kept"]
 
     @app.post("/api/storage/cleanup")
     async def storage_cleanup():

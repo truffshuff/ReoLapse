@@ -698,3 +698,30 @@ def test_trends_and_search_across_days(env):
         left = client.get("/api/search", params={"area": "Garage|0"}).json()
         assert left["area"] == "Left" and {o["category"] for o in left["objects"]} == {"person"}
         assert client.get("/api/search", params={"area": "Garage|5"}).status_code == 400
+
+
+def test_kept_days_survive_cleanup(env, monkeypatch):
+    import json as _json
+    from datetime import date, timedelta
+    from reolapse import cleanup, config, settings as settings_mod
+
+    monkeypatch.setattr(config, "WORK_ROOT", config.DATA_ROOT)
+    settings_mod.save({"cameras": ["Garage"]})
+    today = date(2026, 10, 20)
+    dirs = {}
+    for n in (20, 100):
+        d = config.DATA_ROOT / "garage" / (today - timedelta(days=n)).isoformat()
+        (d / "raw").mkdir(parents=True)
+        (d / "raw" / "main_1.mp4").write_bytes(b"x")
+        (d / "files.json").write_text(_json.dumps([{"path": "main_1.mp4"}]))
+        (d / "out").mkdir()
+        (d / "out" / "synopsis_cutout_category.mp4").write_bytes(b"v")
+        dirs[n] = d.name
+    with TestClient(create_app(JobQueue(fake_command))) as client:
+        assert client.put(f"/api/kept/{dirs[100]}", json={"note": "package stolen"}).json() == {dirs[100]: "package stolen"}
+        assert client.put("/api/kept/yesterday", json={}).status_code == 400
+        p = cleanup.plan({"raw_days": 14, "results_days": 90}, today=today)
+        assert {i.day for i in p.items} == {dirs[20]}  # the old kept day is untouched
+        client.put(f"/api/kept/{dirs[20]}", json={})
+        assert not cleanup.plan({"raw_days": 14, "results_days": 90}, today=today).items
+        assert client.delete(f"/api/kept/{dirs[100]}").json() == {dirs[20]: ""}

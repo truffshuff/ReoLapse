@@ -45,6 +45,9 @@ One card per camera for the selected day: a picture of the scene, a status (*Dow
 day was processed with. ▶ opens the Player; **PDF report** makes a [report](#pdf-report) of the day.
 Use ‹ › or *Recent days* to change day.
 
+**☆ Keep this day** marks a day the [cleanup](#storage-and-cleanup) must never delete (say, the day a
+package went missing), with an optional note shown next to **★ Kept**. Click it again to release the day.
+
 ## Player
 
 ![The Player: changing style, people only, zoom](media/player.gif)
@@ -281,8 +284,9 @@ only** people / vehicles / animals.
   processed is kept); footage of the other stream after a day was downloaded again (e.g. Fluent files
   after a Clear download); leftovers of interrupted downloads; this Mac's copies of finished videos more
   than 2 days old that are already on the archive; and everything for days older than the results limit.
-  Days with a queued or running job are never touched. The panel lists what it would delete and how much
-  that frees; **Clean up now** does it (after asking), and **Clean up automatically after each nightly
+  Days with a queued or running job are never touched, and nor are **kept days** (★ on the Today page;
+  listed under *Kept days*, with **Release**), apart from this Mac's duplicate copies of their finished
+  videos. The panel lists what it would delete and how much that frees; **Clean up now** does it (after asking), and **Clean up automatically after each nightly
   run** keeps it that way.
 
 ### Two Macs
