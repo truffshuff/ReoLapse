@@ -35,6 +35,23 @@
   let found = $state(null);
   let searching = $state(false);
   let searchError = $state('');
+  let areaName = $state('');
+  let areaMsg = $state('');
+
+  // Keep the drawn boxes as a named area: every PDF report of this camera then gets a section for it.
+  async function saveForReports() {
+    areaMsg = '';
+    try {
+      const s = await api.settings();
+      const all = s.areas ?? {};
+      const name = areaName.trim().slice(0, 60);
+      await api.saveSettings({ areas: { ...all, [camera]: [...(all[camera] ?? []), { name, boxes: $state.snapshot(regions) }] } });
+      areaMsg = `Saved “${name}”: the ${camera} section of every report now includes it.`;
+      areaName = '';
+    } catch (e) {
+      areaMsg = `Not saved: ${e.message}`;
+    }
+  }
 
   const cameras = $derived(days.find((d) => d.day === day)?.cameras ?? []);
   // synopsis_<style>_<color>[_<types>].mp4 -> { name, style, color, only }
@@ -266,6 +283,8 @@
     </div>
   {/if}
 
+  {#if areaMsg}<div class="small muted">{areaMsg} <a href={`#/report?day=${day}&cams=${encodeURIComponent(camera)}`}>Open the report</a></div>{/if}
+
   {#if regions.length}
     <section class="panel found" aria-label="Objects in the selected areas">
       <div class="row">
@@ -275,6 +294,10 @@
             <button aria-pressed={kinds[k]} onclick={() => (kinds[k] = !kinds[k])}><span class="dot {k}"></span> {CAT_LABEL[k]}</button>
           {/each}
         </div>
+        <span class="report-area">
+          <input type="text" bind:value={areaName} maxlength="60" placeholder="Name, e.g. Driveway" aria-label="Area name for reports" />
+          <button class="btn" onclick={saveForReports} disabled={!areaName.trim()}>Save for reports</button>
+        </span>
         <span class="small muted push">
           {#if searching}Searching… (the first search of an older day builds an index and can take a few minutes)
           {:else if searchError}<span class="err">{searchError}</span>
@@ -360,6 +383,8 @@
   .toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
   .seg button.missing { opacity: 0.45; }
   .found { display: flex; flex-direction: column; gap: 12px; }
+  .report-area { display: inline-flex; gap: 6px; align-items: center; }
+  .report-area input { width: 180px; }
   .err { color: var(--bad); }
   .results { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
              gap: 10px; max-height: 340px; overflow: auto; }

@@ -130,7 +130,8 @@
   async function save() {
     message = '';
     try {
-      const { nvr: _login, ...patch } = $state.snapshot(s); // the login is saved by Save login
+      // the login is saved by Save login, and report areas by the report page
+      const { nvr: _login, areas: _areas, ...patch } = $state.snapshot(s);
       const out = await api.saveSettings(patch);
       s = out;
       saved = structuredClone(out);

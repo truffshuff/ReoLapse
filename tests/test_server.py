@@ -476,3 +476,17 @@ def test_cancelled_download_does_not_block_and_paused_queue_says_why(env):
         await _until(lambda: analyze.status == "done")
 
     asyncio.run(scenario())
+
+
+def test_report_areas_in_settings(env):
+    import pytest
+    from reolapse import settings as settings_mod
+
+    area = {"name": "Driveway", "boxes": [{"x0": 0.4, "y0": 0.4, "x1": 0.6, "y1": 1.0}]}
+    out = settings_mod.save({"areas": {"Garage": [area]}})
+    assert out["areas"]["Garage"][0]["name"] == "Driveway"
+    assert settings_mod.save({"areas": {}})["areas"] == {}  # the whole map is replaced, so areas can be deleted
+    with pytest.raises(ValueError):
+        settings_mod.save({"areas": {"Garage": [{"name": "x", "boxes": [{"x0": 0, "y0": 0, "x1": 2, "y1": 1}]}]}})
+    with pytest.raises(ValueError):
+        settings_mod.save({"areas": {"Garage": [{"name": "", "boxes": [area["boxes"][0]]}]}})

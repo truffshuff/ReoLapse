@@ -125,10 +125,21 @@ camera, with no videos re-rendered.
   and how long it was on camera, the same cards as *Find in area*.
 
 Above the preview choose the cameras, the types (with one type, its own trails/heatmap/group shot are
-used when they exist) and how many pictures per hour (all, up to 24 or 12, or none: then each hour
+used when they exist) and **cutouts per hour**: all, up to 96, 48, 24, 12 or 6, or none (each hour then
 lists just its counts). **Save PDF** renders it at Letter size and asks where to save it (Downloads by
-default), then opens it. A busy day with all three cameras and up to 24 pictures an hour is about
+default), then opens it. A busy day with all three cameras and up to 24 cutouts an hour is about
 25 pages and 7 MB.
+
+**Areas.** Name a part of a camera's picture, such as *Driveway* or *Front walk*, and the report gets a
+section for it: the area outlined on the scene, its counts, objects per hour and every detection whose
+center passed through it, listed at the time it entered. Two ways to make one:
+
+- in the report preview, under a camera's pictures: **Draw an area**, drag one or more boxes, name it,
+  **Save area** (× on its chip deletes it);
+- in the Player, after drawing boxes with **Find in area**: type a name and **Save for reports**.
+
+Areas are kept per camera and used in every day's report; the summary page lists each area's counts
+under its camera. **Area sections** above the preview leaves them out of a report without deleting them.
 
 ## Jobs
 
