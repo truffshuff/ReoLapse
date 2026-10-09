@@ -140,7 +140,8 @@
               <span class="title">{TITLE[j.kind] ?? j.kind}</span>
               {#if j.options?.only?.length}<span class="small dim">{j.options.only.map((k) => CAT_LABEL[k] ?? k).join(', ')} only</span>{/if}
               {#if j.options?.no_video}<span class="small dim">pictures only</span>{/if}
-              {#if j.kind === 'analyze' && j.options?.model}<span class="small dim">{modelName(j.options.model)} · {j.options.imgsz} px · {j.options.fps} fps</span>{/if}
+              {#if j.kind === 'analyze' && j.options?.model}<span class="small dim">{modelName(j.options.model)} · {j.options.imgsz} px · {j.options.fps} fps{
+                Object.entries(j.options.per_camera ?? {}).map(([c, o]) => ` · ${c}: ${o.imgsz ?? j.options.imgsz} px, ${o.fps ?? j.options.fps} fps`).join('')}</span>{/if}
               <span class="mono muted">{j.day}</span>
               {#if j.group}<span class="small dim">part of job {j.group}</span>{/if}
               <span class="badge {STATUS_CLS[j.status]} push">{j.status}</span>
@@ -221,7 +222,7 @@
         {#if kind === 'analyze' || kind === 'run'}
           <div class="field">
             <div class="lab"><span class="lbl">Model · detector size (px) · frame rate</span>
-              <InfoTip text="Starts from the choices in Settings → Analysis; what you pick here applies to this job only. A job keeps these settings even if Settings change while it waits or is paused. Detector size 1280 is about 2.5× faster than 1920 on Clear footage; 1920 finds more small, distant objects." /></div>
+              <InfoTip text="Starts from the choices in Settings → Analysis; what you pick here applies to this job only. A job keeps these settings even if Settings change while it waits or is paused. Detector size 1280 is about 2.5× faster than 1920 on Clear footage; 1920 finds more small, distant objects. Cameras with their own settings (Settings → Cameras → More) keep those." /></div>
             <div class="an">
               <select bind:value={an.model} aria-label="Detection model">
                 {#each models as m}<option value={m.file}>{m.name}</option>{/each}

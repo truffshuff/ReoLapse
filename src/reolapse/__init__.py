@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import json
 from datetime import date, timedelta
 
 from .config import DEFAULT_CAMERAS
@@ -27,6 +28,8 @@ def _analyze_opts(sp):
                     help="NVR event types that define where to look (comma list), or 'all' to scan the whole day")
     sp.add_argument("--skip-bg", action="store_true", help="reuse existing backgrounds")
     sp.add_argument("--hours", default="0-24", help="only scan events in this hour range, e.g. 7-9")
+    sp.add_argument("--camera-settings", default="",
+                    help='per-camera overrides as JSON, e.g. {"Porch Left": {"imgsz": 960}}')
     sp.add_argument("--done-since", type=float, default=None,
                     help="skip cameras already analyzed with the same settings after this time (epoch seconds); "
                          "the job queue passes its job's creation time so a resumed job doesn't redo finished cameras")
@@ -118,7 +121,8 @@ def main() -> None:
         from . import analyze
         analyze.run(cameras, day, fps=args.fps, model=args.model, imgsz=args.imgsz,
                     types=set(args.types.split(",")), skip_bg=args.skip_bg,
-                    hours=tuple(float(x) for x in args.hours.split("-")), done_since=args.done_since)
+                    hours=tuple(float(x) for x in args.hours.split("-")), done_since=args.done_since,
+                    per_camera=json.loads(args.camera_settings) if args.camera_settings else None)
     if args.cmd in ("render", "run"):
         from . import render
         render.run(cameras, day, styles=args.style.split(","), color=args.color, length=args.length,

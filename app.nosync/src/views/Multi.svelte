@@ -1,5 +1,6 @@
 <script>
   import ZoomControls from '../components/ZoomControls.svelte';
+  import CorrectMenu from '../components/CorrectMenu.svelte';
   import { Zoom, zoomable, viewBox } from '../lib/zoom.svelte.js';
   // Synced original footage: every camera's real recording from the same second, played together.
   import { onMount } from 'svelte';
@@ -56,6 +57,17 @@
       .then((pairs) => { if (day === d) objects = Object.fromEntries(pairs); })
       .finally(() => (loadingEvents = false));
   });
+
+  // A correction from an event card: update the list (an undo reloads that camera's objects).
+  function applyFix(camera, id, value) {
+    const list = objects[camera] ?? [];
+    if (value === null) {
+      api.objects(day, camera, []).then((r) => (objects = { ...objects, [camera]: r.objects })).catch(() => {});
+    } else {
+      objects = { ...objects, [camera]: value === 'hidden' ? list.filter((o) => o.id !== id)
+        : list.map((o) => (o.id === id ? { ...o, category: value, corrected: true } : o)) };
+    }
+  }
 
   // After jumping to an event, start every camera together once they've all loaded (or failed).
   $effect(() => {
@@ -182,6 +194,7 @@
                 <span class="small muted">{ev.camera} · {duration(ev.t1 - ev.t0)}</span>
               </span>
             </button>
+            <CorrectMenu {day} camera={ev.camera} obj={ev} onchange={(id, v) => applyFix(ev.camera, id, v)} />
           </li>
         {/each}
       </ul>
@@ -215,6 +228,7 @@
   figure.picked { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
   .events { display: flex; flex-direction: column; gap: 12px; }
   h2 { font-size: 15px; font-weight: 600; }
+  .results li { position: relative; }
   .results { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
              gap: 10px; max-height: 320px; overflow: auto; }
   .result { width: 100%; padding: 8px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2);

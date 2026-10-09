@@ -74,6 +74,27 @@ def _infer_analysis(paths: DayPaths, present: set[str]) -> dict | None:
     return found
 
 
+_indexes: dict[str, tuple[float, dict]] = {}
+
+
+def _index(paths: DayPaths) -> dict | None:
+    """The day's object index if it has one (cached by modification time); never builds one here."""
+    f = paths.tubes / "index.json"
+    try:
+        mtime = f.stat().st_mtime
+    except OSError:
+        return None
+    hit = _indexes.get(str(f))
+    if hit and hit[0] == mtime:
+        return hit[1]
+    try:
+        index = json.loads(f.read_text())
+    except (OSError, ValueError):
+        return None
+    _indexes[str(f)] = (mtime, index)
+    return index
+
+
 _refreshing: set[tuple[str, str]] = set()
 _lock = threading.Lock()
 
@@ -112,7 +133,16 @@ def _scan(camera: str, day: str) -> dict:
     counts = {"person": 0, "vehicle": 0, "animal": 0}
     hourly = [0] * 24
     hourly_by = {k: [0] * 24 for k in counts}  # objects starting in each hour, per type
-    if paths.tubes.is_dir():
+    index = _index(paths)
+    if index is not None:  # with the day's corrections and the camera's ignore zones applied
+        from .. import review
+
+        for m in review.apply(index, review.load_corrections(paths.tubes), review.zones_for(camera))["tubes"]:
+            hour = min(23, int(m["t0"] // 3600))
+            hourly[hour] += 1
+            hourly_by.setdefault(m["category"], [0] * 24)[hour] += 1
+            counts[m["category"]] = counts.get(m["category"], 0) + 1
+    elif paths.tubes.is_dir():  # an older day without an index yet: by file name
         for p in paths.tubes.glob("*.pkl"):
             t0, cat = (p.stem.split("_") + [""])[:2]  # 036000.0_person[_2]
             try:
@@ -186,6 +216,16 @@ def output_file(camera: str, day: str, name: str) -> Path | None:
         f = folder / name
         if f.is_file():
             return f
+    return None
+
+
+def scene_file(camera: str) -> Path | None:
+    """The camera's most recent midday background (for drawing ignore zones on)."""
+    for day in sorted(_day_dirs(camera), reverse=True):
+        for slot in (72, 78, 66, 84, 60):
+            f = background_file(camera, day, slot)
+            if f is not None:
+                return f
     return None
 
 

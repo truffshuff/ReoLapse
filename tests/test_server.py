@@ -571,3 +571,51 @@ def test_cleanup_removes_local_copies_already_on_the_share(env, tmp_path, monkey
             (p.published / f).write_bytes(b"v" * (10 if same else 9))  # trails differs: not a copy yet
     items = cleanup.plan({"raw_days": 14, "results_days": 90}, today=today).items
     assert [(i.reason, i.path.name, i.day) for i in items] == [("localcopy", "synopsis_cutout_category.mp4", (today - timedelta(days=5)).isoformat())]
+
+
+def test_corrections_and_ignore_zones_apply_everywhere(env, monkeypatch):
+    import pickle
+    from datetime import date
+    from reolapse import config, review, settings as settings_mod, tube_index
+    from reolapse.config import DayPaths
+
+    paths = DayPaths("Garage", date(2026, 10, 1))
+    paths.tubes_out.mkdir(parents=True)
+    crop = b"png"
+    def tube(name, t0, cat, x):
+        frames = [(t0 + k, x, 10, x + 20, 50, crop) for k in range(10)]
+        (paths.tubes_out / f"{name}.pkl").write_bytes(pickle.dumps({"t0": t0, "t1": t0 + 9, "category": cat, "frames": frames}))
+        return tube_index.tube_meta(f"{name}.pkl", t0, t0 + 9, cat, [f[:5] for f in frames])
+    metas = [tube("036000.0_animal", 36000, "animal", 10),   # really a person, bent over
+             tube("036100.0_person", 36100, "person", 10),   # a shadow: not an object
+             tube("036200.0_vehicle", 36200, "vehicle", 150)]  # inside the flag's ignore zone
+    tube_index.write(paths.tubes_out, metas, (200, 100))
+    settings_mod.save({"cameras": ["Garage"], "ignore": {"Garage": [{"x0": 0.7, "y0": 0, "x1": 1, "y1": 1}]}})
+    with TestClient(create_app(JobQueue(fake_command))) as client:
+        put = lambda i, v: client.put(f"/api/days/2026-10-01/Garage/objects/{i}/correction", json={"value": v})
+        assert put("036000.0_animal", "person").status_code == 200
+        assert put("036100.0_person", "hidden").status_code == 200
+        assert put("036100.0_person", "cat").status_code == 400
+        objs = client.get("/api/days/2026-10-01/Garage/objects").json()["objects"]
+        assert [(o["id"], o["category"], o.get("corrected")) for o in objs] == [("036000.0_animal", "person", True)]
+        day = client.get("/api/days/2026-10-01/Garage", params={"fresh": 1}).json()
+        assert day["counts"] == {"person": 1, "vehicle": 0, "animal": 0}
+        assert put("036100.0_person", None).status_code == 200  # undo
+        assert len(client.get("/api/days/2026-10-01/Garage/objects").json()["objects"]) == 2
+    assert review.load_corrections(paths.tubes) == {"036000.0_animal": "person"}
+
+
+def test_per_camera_analysis_settings_are_fixed_and_passed(env):
+    import json as _json
+    from reolapse import settings as settings_mod
+
+    settings_mod.save({"analysis": {"imgsz": 1280}, "camera_analysis": {"Porch Left": {"imgsz": 960, "fps": 5}}})
+    q = JobQueue(fake_command)
+    q.paused = True
+    job = q.submit("analyze", "2026-10-09", ["Garage", "Porch Left"])[0]
+    settings_mod.save({"camera_analysis": {}})  # changed later: the job keeps what it was queued with
+    args = pipeline_args(job, settings_mod.load())
+    assert args[args.index("--imgsz") + 1] == "1280"
+    assert _json.loads(args[args.index("--camera-settings") + 1]) == {"Porch Left": {"imgsz": 960, "fps": 5}}
+    with pytest.raises(ValueError):
+        settings_mod.save({"camera_analysis": {"Garage": {"imgsz": 1000}}})

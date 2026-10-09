@@ -102,6 +102,10 @@ def pin_analysis(job: Job, cfg: dict) -> bool:
     added = [k for k in ANALYSIS_KEYS if k not in job.options]
     for k in added:
         job.options[k] = cfg["analysis"][k]
+    if "per_camera" not in job.options:  # each camera's own settings (Settings > Cameras), fixed now too
+        job.options["per_camera"] = {c: dict(o) for c, o in cfg.get("camera_analysis", {}).items()
+                                     if c in job.cameras and o}
+        added.append("per_camera")
     return bool(added)
 
 
@@ -117,6 +121,8 @@ def pipeline_args(job: Job, cfg: dict) -> list[str]:
                  "--imgsz", str(a["imgsz"])]
         if job.options.get("skip_bg"):
             args.append("--skip-bg")
+        if job.options.get("per_camera"):
+            args += ["--camera-settings", json.dumps(job.options["per_camera"])]
         if job.created:  # resumed after a pause: keep cameras this job already finished
             args += ["--done-since", f"{job.created:.0f}"]
     if job.kind in ("render", "run"):

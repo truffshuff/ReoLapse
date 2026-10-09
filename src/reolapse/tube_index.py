@@ -66,7 +66,8 @@ def query(index: dict, regions: list[tuple[float, float, float, float]], categor
         for t, x0, y0, x1, y1 in m["path"]:
             cx, cy = (x0 + x1) / 2 / W, (y0 + y1) / 2 / H
             if any(rx0 <= cx <= rx1 and ry0 <= cy <= ry1 for rx0, ry0, rx1, ry1 in regions):
-                out.append({"id": m["id"], "category": m["category"], "t0": m["t0"], "t1": m["t1"], "enter": t})
+                out.append({"id": m["id"], "category": m["category"], "t0": m["t0"], "t1": m["t1"], "enter": t,
+                            **({"corrected": True} if m.get("corrected") else {})})
                 break
     return out
 

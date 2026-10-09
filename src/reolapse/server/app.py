@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .. import config
+from .. import config, review
 from .. import settings as settings_mod
 from ..config import DayPaths
 from pathlib import Path
@@ -50,6 +50,10 @@ class NvrLogin(BaseModel):
     user: str
     port: int = 80
     password: str | None = None  # omitted/empty = keep the stored one
+
+
+class CorrectionBody(BaseModel):
+    value: str | None = None  # person / vehicle / animal / hidden; None undoes the correction
 
 
 class TokenBody(BaseModel):
@@ -204,6 +208,14 @@ def create_app(queue: JobQueue | None = None, updater=None) -> FastAPI:
             raise HTTPException(404, "no such background")
         return _scaled(f, w) if w else FileResponse(f, media_type="image/jpeg")
 
+    @app.get("/api/cameras/{camera}/scene")
+    def camera_scene(camera: str, w: int = 1280):
+        """The camera's latest midday picture."""
+        f = library.scene_file(_check_camera(camera))
+        if f is None:
+            raise HTTPException(404, "no picture of this camera yet")
+        return _scaled(f, w)
+
     @app.get("/api/days/{day}/{camera}/clip")
     async def clip(day: str, camera: str, t: float, dur: float = 30.0):
         """Original footage starting at day-second `t`, streamed as fragmented MP4 (no re-encode)."""
@@ -250,7 +262,23 @@ def create_app(queue: JobQueue | None = None, updater=None) -> FastAPI:
             raise HTTPException(400, "regions must be x0,y0,x1,y1;...")
         boxes = [(min(a, c), min(b, d), max(a, c), max(b, d)) for a, b, c, d in boxes] or [(0, 0, 1, 1)]
         cats = {c for c in categories.split(",") if c} or None
+        index = review.apply(index, review.load_corrections(paths.tubes), review.zones_for(paths.camera))
         return {"width": index["width"], "height": index["height"], "objects": tube_index.query(index, boxes, cats)}
+
+    @app.put("/api/days/{day}/{camera}/objects/{obj_id}/correction")
+    def correct_object(day: str, camera: str, obj_id: str, body: CorrectionBody):
+        """Fix an object's type ("person" / "vehicle" / "animal"), hide it ("hidden"), or undo (null)."""
+        if not re.fullmatch(r"[0-9.]+_[a-z]+(_\d+)?", obj_id):
+            raise HTTPException(400, "bad object id")
+        paths = DayPaths(_check_camera(camera), date.fromisoformat(_check_day(day)))
+        if not (paths.tubes / f"{obj_id}.pkl").is_file():
+            raise HTTPException(404, "no such object")
+        try:
+            review.save_correction(paths.tubes, obj_id, body.value)
+        except (ValueError, OSError) as e:
+            raise HTTPException(400, str(e))
+        library._cache.pop((paths.camera, day), None)
+        return {"id": obj_id, "value": body.value}
 
     @app.get("/api/days/{day}/{camera}/objects/{obj_id}/thumb")
     def object_thumb(day: str, camera: str, obj_id: str, size: int = 0):

@@ -25,10 +25,18 @@ DEFAULTS: dict = {
     "updates": {"repo": "truffshuff/ReoLapse", "check_on_launch": True},  # token: system keychain
     "streams": {},  # camera name -> "sub" (Fluent, default) or "main" (Clear)
     "areas": {},  # camera name -> [{"name": "Driveway", "boxes": [{"x0": .., "y0": .., "x1": .., "y1": ..}]}]
+    "ignore": {},  # camera name -> [{"x0": .., "y0": .., "x1": .., "y1": ..}]: zones where nothing counts
+    "camera_analysis": {},  # camera name -> {"model"?, "imgsz"?, "fps"?}: overrides of "analysis" for that camera
 }
 
 # Settings whose keys are user data (camera names), not a fixed schema.
-FREE_FORM = {"streams", "areas"}
+FREE_FORM = {"streams", "areas", "ignore", "camera_analysis"}
+
+
+def _check_box(b, what: str) -> None:
+    v = [b.get(k) for k in ("x0", "y0", "x1", "y1")] if isinstance(b, dict) else []
+    if len(v) != 4 or not all(isinstance(x, (int, float)) and 0 <= x <= 1 for x in v):
+        raise ValueError(f"{what} has a box outside the picture")
 
 
 def _check_areas(value: dict) -> None:
@@ -43,9 +51,7 @@ def _check_areas(value: dict) -> None:
             if not isinstance(boxes, list) or not 1 <= len(boxes) <= 20:
                 raise ValueError(f"area {name!r} needs 1 to 20 boxes")
             for b in boxes:
-                v = [b.get(k) for k in ("x0", "y0", "x1", "y1")] if isinstance(b, dict) else []
-                if len(v) != 4 or not all(isinstance(x, (int, float)) and 0 <= x <= 1 for x in v):
-                    raise ValueError(f"area {name!r} has a box outside the picture")
+                _check_box(b, f"area {name!r}")
 
 
 def _merge(base: dict, patch: dict, path: str = "") -> dict:
@@ -61,6 +67,22 @@ def _merge(base: dict, patch: dict, path: str = "") -> dict:
                 raise ValueError("streams values must be 'sub' (Fluent) or 'main' (Clear)")
             if key == "areas":
                 _check_areas(value)
+            if key == "camera_analysis":
+                for camera, o in value.items():
+                    if not isinstance(o, dict) or set(o) - {"model", "imgsz", "fps"}:
+                        raise ValueError(f"analysis settings for {camera} may set only model, imgsz and fps")
+                    if "model" in o and not (isinstance(o["model"], str) and o["model"].endswith(".pt")):
+                        raise ValueError(f"model for {camera} must be a .pt file name")
+                    if "imgsz" in o and o["imgsz"] not in (640, 960, 1280, 1600, 1920, 2560):
+                        raise ValueError(f"detector size for {camera} must be 640, 960, 1280, 1600, 1920 or 2560")
+                    if "fps" in o and not (isinstance(o["fps"], (int, float)) and 1 <= o["fps"] <= 30):
+                        raise ValueError(f"frame rate for {camera} must be 1 to 30")
+            if key == "ignore":
+                for camera, boxes in value.items():
+                    if not isinstance(boxes, list) or len(boxes) > 30:
+                        raise ValueError(f"ignore zones for {camera} must be a list of at most 30 boxes")
+                    for b in boxes:
+                        _check_box(b, f"an ignore zone on {camera}")
             out[key] = dict(value)
         elif isinstance(base[key], dict):
             if not isinstance(value, dict):

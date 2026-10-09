@@ -9,6 +9,7 @@
   import VideoState from '../components/VideoState.svelte';
   import SourceInfo from '../components/SourceInfo.svelte';
   import ZoomControls from '../components/ZoomControls.svelte';
+  import CorrectMenu from '../components/CorrectMenu.svelte';
   import { Zoom, zoomable, viewBox } from '../lib/zoom.svelte.js';
   import { jobState } from '../lib/busy.svelte.js';
 
@@ -352,6 +353,10 @@
                   <span class="small muted">{duration(o.t1 - o.t0)} on camera</span>
                 </span>
               </button>
+              <CorrectMenu {day} {camera} obj={o} onchange={() => {
+                regions = [...regions]; // search again with the correction applied
+                api.cameraDay(day, camera, true).then((x) => (info = x)).catch(() => {});
+              }} />
             </li>
           {/each}
         </ul>
@@ -425,6 +430,7 @@
   .report-area { display: inline-flex; gap: 6px; align-items: center; }
   .report-area input { width: 180px; }
   .err { color: var(--bad); }
+  .results li { position: relative; }
   .results { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
              gap: 10px; max-height: 340px; overflow: auto; }
   .result { width: 100%; padding: 8px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2);

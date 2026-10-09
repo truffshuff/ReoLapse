@@ -192,3 +192,20 @@ def test_second_clock_video_and_stale_cleanup(tmp_path, monkeypatch):
     monkeypatch.setattr(settings_mod, "SETTINGS_PATH", tmp_path / "settings.json")
     args = pipeline_args(Job("render", "2026-10-01", ["Garage"]), settings_mod.load())
     assert "--second-clock" in args and args[args.index("--clock") + 1] == "adaptive"
+
+
+def test_render_leaves_out_hidden_and_ignored_objects(tmp_path, monkeypatch):
+    import json
+    from reolapse import review
+
+    paths = _day(tmp_path, monkeypatch)
+    monkeypatch.setattr(settings_mod, "SETTINGS_PATH", tmp_path / "settings.json")
+    ids = sorted(p.stem for p in paths.tubes_out.glob("*.pkl"))  # person, vehicle, person
+    review.save_correction(paths.tubes_out, ids[0], "hidden")
+    review.save_correction(paths.tubes_out, ids[1], "animal")  # was a vehicle
+    _render(stills=False)
+    side = json.loads((paths.published / "synopsis_cutout_category.json").read_text())
+    assert side["tubes"] == 2 and side["categories"] == ["animal", "person"]
+    settings_mod.save({"ignore": {"Garage": [{"x0": 0, "y0": 0, "x1": 1, "y1": 1}]}})  # the whole picture
+    _render(stills=False)
+    assert not (paths.out / "synopsis_cutout_category.mp4").stat().st_size == 0

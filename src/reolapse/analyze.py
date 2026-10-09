@@ -292,8 +292,10 @@ def save_tube(paths: DayPaths, seg: list[Det], fps: float, context: list[Det] = 
 class MotionGate:
     """Cheap low-res frame differencing; YOLO only runs while something is changing."""
 
-    def __init__(self, fps: float, width: int = 640, hold: float = 1.5):
+    def __init__(self, fps: float, width: int = 640, hold: float = 1.5, ignore: list | None = None):
         self.width = width
+        self.ignore = ignore or []  # ignore zones (0..1 boxes): motion there doesn't count
+        self._mask = None
         self.lag = max(1, int(round(fps * 0.5)))
         self.prev: deque = deque(maxlen=self.lag + 1)
         self.hold = hold
@@ -316,6 +318,12 @@ class MotionGate:
         # on Porch Left's 640x360 night stream this cut the gate from ~37% to <1% of frames while busy
         # afternoons still pass ~25-30%.
         diff = (cv2.absdiff(small, self.prev[0]) > GATE_DIFF).astype(np.uint8)
+        if self.ignore:
+            if self._mask is None or self._mask.shape != diff.shape:
+                from .review import gate_mask
+
+                self._mask = gate_mask(self.ignore, diff.shape[1], diff.shape[0])
+            diff &= self._mask
         diff = cv2.morphologyEx(diff, cv2.MORPH_OPEN, self._kernel)
         if int(np.count_nonzero(diff)) > GATE_MIN_PIXELS:
             self.last_motion = t
@@ -419,7 +427,9 @@ def detect_tubes(paths: DayPaths, recs: list[Recording], windows, fps: float, mo
     _no_nms_time_limit()
     model = YOLO(str(MODEL_DIR / model_name))
     keep = [i for i, n in model.names.items() if n in CATEGORIES]
-    gate = MotionGate(fps)
+    from .review import zones_for
+
+    gate = MotionGate(fps, ignore=zones_for(paths.camera))
     tracker = _tracker()
     stats: Counter = Counter(m["category"] for m in metas)
     total = sum(b - a for a, b in windows)
@@ -565,11 +575,16 @@ def finished_since(paths: DayPaths, since: float | None, **settings) -> bool:
 
 
 def run(cameras: list[str], day, *, fps: float, model: str, imgsz: int, types: set[str], skip_bg: bool,
-        hours: tuple[float, float] = (0, 24), done_since: float | None = None) -> None:
+        hours: tuple[float, float] = (0, 24), done_since: float | None = None,
+        per_camera: dict | None = None) -> None:
+    """per_camera: {camera: {"fps"?, "model"?, "imgsz"?}} overriding the settings for that camera."""
+    defaults = (fps, model, imgsz)
     for cam in cameras:
+        own = (per_camera or {}).get(cam, {})
+        fps, model, imgsz = float(own.get("fps", defaults[0])), own.get("model", defaults[1]), int(own.get("imgsz", defaults[2]))
         paths = DayPaths(cam, day)
         cam_t0 = time.monotonic()
-        print(f"== {cam}: finding moving objects on {day}")
+        print(f"== {cam}: finding moving objects on {day}" + (" (with this camera's own settings)" if own else ""))
         if finished_since(paths, done_since, fps=fps, model=model, imgsz=imgsz, types=types, hours=hours):
             print("   already finished earlier in this job with the same settings; keeping those results")
             continue

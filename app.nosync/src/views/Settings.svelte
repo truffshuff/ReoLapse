@@ -3,6 +3,7 @@
   import { api } from '../lib/api.js';
   import Switch from '../components/Switch.svelte';
   import InfoTip from '../components/InfoTip.svelte';
+  import RegionOverlay from '../components/RegionOverlay.svelte';
 
   const LOCAL_WORK = '~/Library/Caches/reolapse';
   const MOVING_LENS = /track|ptz/i; // TrackMix / TrackFlex lenses pan and zoom: no stable background
@@ -39,6 +40,8 @@
     raw: 'Downloaded recordings are the biggest files (about 5–21 GB per camera per day). Days older than this would be deleted; the finished videos and stills are kept separately.',
     results: 'How long finished videos, stills and the object data behind them are kept.',
     nightly: 'At this time each night, Reolapse queues yesterday for every included camera: the whole pipeline for a day with nothing yet, just a render for a day already analyzed, nothing for a day that\'s done. It also catches up on the few days before that, and if the Mac was off or asleep at that time it runs the next time Reolapse is open. Turn it on in one Mac only.',
+    ignore: 'Draw boxes over parts of the picture where nothing should count: a waving flag, a tree, the far street. An object that spends nearly all its time inside them is left out of counts, searches, reports and (at their next render) videos, for days already processed too; motion there also stops waking the detector in later scans.',
+    own: 'Use different detection settings for this camera than the Analysis defaults, e.g. a smaller detector size for a busy or high-resolution camera so it keeps up. Jobs fix these settings when they are queued.',
     cleanup: 'Deletes what the limits above allow: downloaded footage older than the raw limit once that day has been rendered (footage that was never processed is kept), footage of the other stream after a day was downloaded again (for example Fluent files after a Clear download), leftovers of interrupted downloads, and everything for days older than the results limit. Days with a queued or running job are never touched.',
     cameras: 'Only fixed cameras work for synopsis: the background has to stay still. Tracking (pan/zoom) lenses are flagged.',
     stream: 'Fluent is the camera\'s low-resolution sub stream: small and quick, about 100x real time to process (Garage 1920×576, ~5 GB a day). Clear is the full-resolution main stream: much sharper cutouts, but far bigger and slower: Garage 5120×1552 is ~36 GB and ~45 min of downloading a day, Porch Left 4K is ~89 GB and ~1.7 h, and a whole-day scan takes about 3 hours per camera even on the hardware decoder. Clear frames are scaled to 2560 px wide for processing. A change applies the next time a day is downloaded; that day is then re-analyzed in the new stream.',
@@ -83,6 +86,20 @@
   }
 
   let upd = $state(null);
+  let more = $state(null); // the camera whose extra settings are open
+  let sceneMissing = $state({});
+
+  function openMore(name) {
+    more = more === name ? null : name;
+    if (more && !s.ignore?.[name]) s.ignore = { ...(s.ignore ?? {}), [name]: [] };
+  }
+  const ownOf = (name) => s.camera_analysis?.[name];
+  function setOwn(name, on) {
+    const next = { ...(s.camera_analysis ?? {}) };
+    if (on) next[name] = { model: s.analysis.model, imgsz: Number(s.analysis.imgsz), fps: Number(s.analysis.fps) };
+    else delete next[name];
+    s.camera_analysis = next;
+  }
   let night = $state(null);
   let store = $state(null);
   let storeBusy = $state('');
@@ -254,13 +271,44 @@
       <div class="cam-head small dim"><span></span><span class="lab">Stream<InfoTip text={HELP.stream} /></span><span>Include</span></div>
       {#each cameraRows as c (c.name)}
         <div class="cam-row">
-          <div class="cam-text"><span class="name">{c.name}</span>{#if c.hint}<span class="small" class:warn={c.moving}>{c.hint}</span>{/if}</div>
+          <div class="cam-text"><span class="name">{c.name}</span>{#if c.hint}<span class="small" class:warn={c.moving}>{c.hint}</span>{/if}
+            <span class="small dim">{[ownOf(c.name) && `own analysis: ${ownOf(c.name).imgsz} px · ${ownOf(c.name).fps} fps`,
+              s.ignore?.[c.name]?.length && `${s.ignore[c.name].length} ignore zone${s.ignore[c.name].length === 1 ? '' : 's'}`].filter(Boolean).join(' · ')}</span>
+            <button type="button" class="linkish" aria-expanded={more === c.name} onclick={() => openMore(c.name)}>{more === c.name ? 'Less' : 'More'}</button></div>
           <div class="seg" role="group" aria-label="{c.name} stream">
             <button type="button" aria-pressed={streamOf(c.name) === 'sub'} onclick={() => setStream(c.name, 'sub')}>Fluent</button>
             <button type="button" aria-pressed={streamOf(c.name) === 'main'} onclick={() => setStream(c.name, 'main')}>Clear</button>
           </div>
           <Switch compact label="Include {c.name}" checked={c.on} onchange={(on) => setCamera(c.name, on)} />
         </div>
+        {#if more === c.name}
+          <div class="cam-more">
+            <div class="row"><h3 class="sub-h">Analysis for {c.name}</h3><InfoTip text={HELP.own} /></div>
+            <Switch label="Use its own settings instead of the Analysis defaults" checked={!!ownOf(c.name)} onchange={(on) => setOwn(c.name, on)} />
+            {#if ownOf(c.name)}
+              <div class="cols3">
+                <div class="field"><label for="own-model-{c.name}">Model</label>
+                  <select id="own-model-{c.name}" bind:value={s.camera_analysis[c.name].model}>{#each models as m}<option value={m.file}>{m.name}</option>{/each}</select></div>
+                <div class="field"><label for="own-size-{c.name}">Detector size</label>
+                  <select id="own-size-{c.name}" bind:value={s.camera_analysis[c.name].imgsz}>{#each [640, 960, 1280, 1600, 1920] as z}<option value={z}>{z} px</option>{/each}</select></div>
+                <div class="field"><label for="own-fps-{c.name}">Frame rate</label>
+                  <select id="own-fps-{c.name}" bind:value={s.camera_analysis[c.name].fps}><option value={5}>5 fps</option><option value={10}>10 fps</option></select></div>
+              </div>
+            {/if}
+            <div class="row"><h3 class="sub-h">Ignore zones</h3><InfoTip text={HELP.ignore} />
+              {#if s.ignore?.[c.name]?.length}<button type="button" class="btn quiet mini push" onclick={() => (s.ignore[c.name] = [])}>Remove all</button>{/if}</div>
+            {#if sceneMissing[c.name]}
+              <p class="desc">There's no picture of this camera yet: zones can be drawn once a day has been analyzed.</p>
+            {:else}
+              <div class="scene">
+                <img src={`/api/cameras/${encodeURIComponent(c.name)}/scene`} alt="{c.name}"
+                     onerror={() => (sceneMissing = { ...sceneMissing, [c.name]: true })} />
+                <RegionOverlay bind:regions={s.ignore[c.name]} drawing={true} />
+              </div>
+              <p class="desc">Drag on the picture to add a zone; × removes one. Saved with <strong>Save changes</strong>.</p>
+            {/if}
+          </div>
+        {/if}
       {/each}
     </section>
 
@@ -493,6 +541,11 @@
   .inline { display: flex; gap: 10px; }
   .inline input { flex: 1; min-width: 0; }
   input[type=range] { width: 100%; }
+  .linkish { align-self: flex-start; padding: 0; border: 0; background: none; color: var(--accent); font-size: 12.5px; cursor: pointer; }
+  .cam-more { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px 16px; margin-bottom: 8px; border-radius: 10px;
+              background: var(--surface-2, #171B23); border: 1px solid var(--line); }
+  .scene { position: relative; border-radius: 8px; overflow: hidden; }
+  .scene img { width: 100%; display: block; }
   .disks { display: flex; flex-direction: column; gap: 10px; }
   .meter { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; margin-top: 4px; }
   .meter div { height: 100%; background: var(--accent); }

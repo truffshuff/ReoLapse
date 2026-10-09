@@ -7,6 +7,7 @@
   import { api, media } from '../lib/api.js';
   import { clock, duration, longDay, STREAM_NAME, analyzedFrom, analyzedWith, when } from '../lib/format.js';
   import RegionOverlay from '../components/RegionOverlay.svelte';
+  import CorrectMenu from '../components/CorrectMenu.svelte';
 
   let { params } = $props();
 
@@ -263,7 +264,8 @@
             <li>
               <img src={media.thumb(day, camera, o.id, 240)} alt="{NOUN[o.category][0]} at {clock(o[key])}" {loading} />
               <span class="t"><i class="sw {o.category}"></i>{clock(o[key], true)}</span>
-              <span class="d">{NOUN[o.category][0]} · {duration(o.t1 - o.t0)}</span>
+              <span class="d">{NOUN[o.category][0]}{o.corrected ? ' (corrected)' : ''} · {duration(o.t1 - o.t0)}</span>
+              {#if !print}<CorrectMenu {day} {camera} obj={o} onchange={() => { types = [...types]; load(); }} />{/if}
             </li>
           {/each}
         </ul>
@@ -484,7 +486,7 @@
 
   .hour { break-inside: auto; }
   .thumbs { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; }
-  .thumbs li { break-inside: avoid; display: flex; flex-direction: column; gap: 1px; }
+  .thumbs li { break-inside: avoid; display: flex; flex-direction: column; gap: 1px; position: relative; }
   .thumbs img { width: 100%; height: 78px; object-fit: contain; background: var(--wash); border-radius: 3px; }
   .thumbs .t { display: flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; font-size: 10px; }
   .thumbs .d { color: var(--ink-3); font-size: 9.5px; }

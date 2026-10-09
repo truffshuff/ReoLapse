@@ -55,6 +55,7 @@ class Tube:
     boxes: list[tuple[int, int, int, int]]
     pngs: list[bytes]
     context: list = field(default_factory=list)  # [(x0, y0, x1, y1, png)] stationary objects it was near
+    id: str = ""
     speed: float = 1.0  # real seconds per output second
     start: float = 0.0  # placement in the output video (seconds)
 
@@ -85,8 +86,26 @@ def load_tubes(paths: DayPaths, only: set[str] | None) -> list[Tube]:
             continue
         fr = d["frames"]
         tubes.append(Tube(d["t0"], d["t1"], d["category"], [f[0] for f in fr],
-                          [tuple(f[1:5]) for f in fr], [f[5] for f in fr], context=d.get("context", [])))
+                          [tuple(f[1:5]) for f in fr], [f[5] for f in fr], context=d.get("context", []), id=p.stem))
     return tubes
+
+
+def reviewed(tubes: list[Tube], paths: DayPaths, shape) -> list[Tube]:
+    """Apply the day's corrections and the camera's ignore zones (see reolapse.review)."""
+    from . import review
+
+    fixes, zones = review.load_corrections(paths.tubes), review.zones_for(paths.camera)
+    if not fixes and not zones:
+        return tubes
+    out = []
+    for t in tubes:
+        fix = review.keep(t.id, t.boxes, fixes, zones, shape[1], shape[0])
+        if fix is None:
+            continue
+        if fix:
+            t.category = fix
+        out.append(t)
+    return out
 
 
 class Backgrounds:
@@ -487,6 +506,11 @@ def run(cameras, day, *, styles: list[str], color: str, length: float | None, de
         paths = DayPaths(cam, day)
         print(f"== {cam}: making the videos and stills for {day}")
         all_tubes = load_tubes(paths, None)
+        if all_tubes and paths.backgrounds.is_dir() and any(paths.backgrounds.glob("*.jpg")):
+            n0 = len(all_tubes)
+            all_tubes = reviewed(all_tubes, paths, Backgrounds(paths.backgrounds).shape)
+            if len(all_tubes) != n0:
+                print(f"   {n0 - len(all_tubes)} object(s) left out: hidden by hand or inside an ignore zone")
         tubes = [t for t in all_tubes if not only or t.category in only]
         if not tubes:
             print("   no moving objects found for this day yet; run the analysis first" if not all_tubes
