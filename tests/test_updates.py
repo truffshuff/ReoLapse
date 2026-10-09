@@ -27,6 +27,8 @@ def fake_keychain(monkeypatch, tmp_path):
 
 
 def github(request):
+    if "authorization" not in request.headers:  # a private repository looks like no release at all
+        return httpx.Response(404)
     assert request.headers["authorization"] == "Bearer good-token"
     if request.url.path.endswith("/releases/latest"):
         return httpx.Response(200, json={"tag_name": "v0.1.3", "name": "v0.1.3", "body": "Ignore parked cars",

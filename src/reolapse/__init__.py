@@ -4,7 +4,6 @@ import json
 import sys
 from datetime import date, timedelta
 
-from .config import DEFAULT_CAMERAS
 
 
 def _day(s: str | None) -> date:
@@ -99,7 +98,9 @@ def main() -> None:
         else:
             print(f"freed {cleanup.execute(p) / 1e9:.1f} GB")
         return
-    cameras = args.camera or DEFAULT_CAMERAS
+    if not args.camera:
+        from .settings import load
+    cameras = args.camera or load()["cameras"]
     day = _day(args.day)
     if args.cmd == "probe":
         from . import probe

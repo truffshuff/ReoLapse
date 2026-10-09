@@ -6,3 +6,6 @@ work/
 output/
 *.pt
 .venv.nosync/
+
+# synthetic demo data (tools/make_demo.py)
+demo/

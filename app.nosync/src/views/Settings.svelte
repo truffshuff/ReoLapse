@@ -48,7 +48,7 @@
     perType: 'Each switch adds one more video per camera and day, in the first style above, containing only that kind of object. With fewer objects they are shorter, less crowded and quicker to render than the full video. The Player switches between them with Show.',
     work: 'Where backgrounds and object data are written and videos are rendered. These are many small, random reads and writes, so a folder on this Mac is much faster than the network share. Finished videos and stills are still copied to the archive, and days processed before you change this keep working from the share. About 1 GB per camera per day accumulates here.',
     archive: 'Where downloaded recordings, the NVR event lists and the finished videos and stills are kept: usually a folder on your NAS share, mounted on this Mac. Leave empty for the default. When it can\'t be reached, the job queue pauses itself.',
-    updates: 'Reolapse checks its GitHub releases for a newer version. The repository is private, so it needs a GitHub token that can read it; the token is stored in the macOS Keychain. Because the app isn\'t signed by Apple it can\'t replace itself: the new version is downloaded to your Downloads folder and opened, and you drag Reolapse into Applications (replace the old one). Your settings, login and processed days are kept.',
+    updates: 'Reolapse checks its GitHub releases for a newer version. A public repository needs nothing more; while the repository is private, it needs a read-only GitHub token, stored in the macOS Keychain. The app isn\'t signed by Apple, so it can\'t replace itself: the new version is downloaded to your Downloads folder and opened, and you drag Reolapse into Applications (replace the old one). Your settings, login and processed days are kept.',
     nvr: 'The address and login of your Reolink NVR. Use a dedicated NVR user (viewing and playback is enough) whose password has no & # % or spaces; the NVR\'s web API breaks on those. The password is stored in the macOS Keychain, not in a file.',
   };
 
@@ -510,12 +510,12 @@
         {/if}
         {#if upd?.error}<p class="desc bad-text">{upd.error}</p>{/if}
         <div class="row">
-          <button class="btn" onclick={checkUpdates} disabled={checking || !upd?.token_set}>{checking ? 'Checking…' : 'Check for updates'}</button>
+          <button class="btn" onclick={checkUpdates} disabled={checking}>{checking ? 'Checking…' : 'Check for updates'}</button>
           {#if upd?.checked_at}<span class="small muted">Last checked {new Date(upd.checked_at * 1000).toLocaleString()}</span>{/if}
         </div>
         <Switch label="Check when Reolapse opens" bind:checked={s.updates.check_on_launch} />
         <div class="field">
-          <div class="lab"><label for="gh-token">GitHub token</label></div>
+          <div class="lab"><label for="gh-token">GitHub token (only for a private repository)</label></div>
           <div class="inline">
             <input id="gh-token" type="password" bind:value={token} autocomplete="off"
                    placeholder={upd?.token_set ? 'saved (paste a new one to replace)' : 'github_pat_…'} />

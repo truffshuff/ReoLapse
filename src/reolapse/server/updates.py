@@ -1,6 +1,6 @@
 """Checking GitHub Releases for a newer Reolapse, and fetching its installer.
 
-The repository is private, so the GitHub API needs a token: a fine-grained, read-only token
+A public repository needs no token. While it's private the GitHub API needs one: a fine-grained, read-only token
 (Contents: read) for the one repository, kept in the system keychain. macOS won't auto-install an
 app that isn't signed with an Apple developer certificate, so an update is downloaded to
 ~/Downloads and its disk image opened; the person drags the new app into Applications.
@@ -63,9 +63,11 @@ def set_token(token: str | None) -> None:
             pass
 
 
-def _headers(token: str, accept: str = "application/vnd.github+json") -> dict:
-    return {"Authorization": f"Bearer {token}", "Accept": accept, "X-GitHub-Api-Version": "2022-11-28",
-            "User-Agent": "Reolapse"}
+def _headers(token: str | None, accept: str = "application/vnd.github+json") -> dict:
+    h = {"Accept": accept, "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "Reolapse"}
+    if token:
+        h["Authorization"] = f"Bearer {token}"
+    return h
 
 
 class Updater:
@@ -86,17 +88,15 @@ class Updater:
     async def check(self, force: bool = False) -> dict:
         if not force and self.state["checked_at"] and time.time() - self.state["checked_at"] < CHECK_EVERY:
             return self.status()
-        token = get_token()
-        if not token:
-            self.state.update(error="Add a GitHub token below to check for updates.", checked_at=None)
-            return self.status()
+        token = get_token()  # optional: only a private repository needs one
         try:
             async with self.client_factory() as client:
                 r = await client.get(f"{API}/repos/{self.repo_for()}/releases/latest", headers=_headers(token))
             if r.status_code in (401, 403):
                 raise RuntimeError("GitHub refused the token (expired, or missing Contents: read on this repository)")
             if r.status_code == 404:
-                raise RuntimeError("no release found (or the token can't see this repository)")
+                raise RuntimeError("no release found" + ("" if token else ": if the repository is private, add a GitHub token below")
+                                   + (" (or the token can't see this repository)" if token else ""))
             r.raise_for_status()
             rel = r.json()
             asset = next((a for a in rel.get("assets", []) if a["name"].endswith(".dmg")), None)
@@ -125,7 +125,7 @@ class Updater:
             dest.parent.mkdir(parents=True, exist_ok=True)
             async with self.client_factory() as client:
                 async with client.stream("GET", f"{API}/repos/{self.repo_for()}/releases/assets/{asset['id']}",
-                                         headers=_headers(get_token() or "", "application/octet-stream")) as r:
+                                         headers=_headers(get_token(), "application/octet-stream")) as r:
                     r.raise_for_status()
                     with open(part, "wb") as fh:
                         async for chunk in r.aiter_bytes(1 << 20):

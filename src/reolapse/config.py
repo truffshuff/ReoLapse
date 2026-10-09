@@ -30,7 +30,7 @@ def _setting(*keys: str) -> str:
 def _data_root() -> Path:
     """Share: raw recordings, the NVR event list, and the finished videos/stills.
     REOLAPSE_DATA wins, then the storage.data_root setting."""
-    return Path(os.environ.get("REOLAPSE_DATA") or _setting("storage", "data_root") or "/Volumes/Photos/ReoLink").expanduser()
+    return Path(os.environ.get("REOLAPSE_DATA") or _setting("storage", "data_root") or "~/Movies/Reolapse").expanduser()
 
 
 DATA_ROOT = _data_root()
@@ -64,7 +64,6 @@ def _model_dir() -> Path:
 WORK_ROOT = _work_root()
 MODEL_DIR = _model_dir()
 
-DEFAULT_CAMERAS = ["Garage", "Porch Left", "Back Yard Right"]
 
 # YOLO (COCO) class name -> reolapse category
 CATEGORIES = {

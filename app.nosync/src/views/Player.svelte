@@ -27,6 +27,7 @@
   let meta = $state(null); // the video's sidecar: timing and the settings it was made with
   let pendingT = $state(params.t != null ? Number(params.t) : null); // opened at a time (from Search)
   let synReady = $state(false); // the synopsis video's metadata has loaded (it can seek)
+  let keepT = $state(null); // time of day to continue at after switching style / type / clock
   let length = $state(0); // synopsis seconds that span the 24 h day (from the render's sidecar)
   let synTime = $state(0);
   let originalAt = $state('12:00');
@@ -85,6 +86,7 @@
   const hasAlt = (style, only) => videos.some((v) => v.style === style && v.only === only && v.alt);
   // switch one control and keep the others where possible
   function choose(style, only, alt = current?.alt ?? null) {
+    if (dayT != null) keepT = dayT; // the new video continues at the same time of day
     const main = videos.filter((v) => !v.alt);
     const pick = (alt && videos.find((v) => v.style === style && v.only === only && v.alt === alt))
       ?? main.find((v) => v.style === style && v.only === only)
@@ -196,6 +198,14 @@
     if (!length && synVideo?.duration) length = synVideo.duration;
     synReady = true;
   }
+
+  // After switching video: continue at the same time of day (each video has its own clock).
+  $effect(() => {
+    if (keepT == null || !length || !synVideo || !synReady) return;
+    const t = keepT;
+    keepT = null;
+    synVideo.currentTime = toVideo(t);
+  });
 
   // Opened from a search result: jump there (and show the original footage) once the video is ready.
   $effect(() => {
