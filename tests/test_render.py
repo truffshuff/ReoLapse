@@ -173,3 +173,22 @@ def test_adaptive_video_records_its_clock(tmp_path, monkeypatch):
     _render(stills=False)
     side = json.loads((paths.published / "synopsis_cutout_category.json").read_text())
     assert side["clock"] == "even" and side["map"] is None
+
+
+def test_second_clock_video_and_stale_cleanup(tmp_path, monkeypatch):
+    import json
+
+    paths = _day(tmp_path, monkeypatch)
+    _render(styles=["cutout", "ghost"], stills=False, clock_mode="adaptive", second_clock=True)
+    names = {p.name for p in paths.published.glob("*.mp4")}
+    assert names == {"synopsis_cutout_category.mp4", "synopsis_ghost_category.mp4", "synopsis_cutout_category_even.mp4"}
+    side = lambda n: json.loads((paths.published / n).read_text())["clock"]
+    assert side("synopsis_cutout_category.json") == "adaptive" and side("synopsis_cutout_category_even.json") == "even"
+    _render(styles=["cutout"], stills=False, clock_mode="even", second_clock=True)  # Settings flipped
+    names = {p.name for p in paths.published.glob("*.mp4")}
+    assert "synopsis_cutout_category_even.mp4" not in names and "synopsis_cutout_category_adaptive.mp4" in names
+    _render(styles=["cutout"], stills=False, clock_mode="even")  # switched off: the other clock goes
+    assert not list(paths.published.glob("*_adaptive.*"))
+    monkeypatch.setattr(settings_mod, "SETTINGS_PATH", tmp_path / "settings.json")
+    args = pipeline_args(Job("render", "2026-10-01", ["Garage"]), settings_mod.load())
+    assert "--second-clock" in args and args[args.index("--clock") + 1] == "adaptive"

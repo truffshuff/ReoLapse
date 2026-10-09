@@ -296,6 +296,7 @@
           <div class="lab"><span>Clock</span><InfoTip text={HELP.clock} /></div>
           <Switch label="Adaptive: busy times get more of the video" checked={s.render.clock === 'adaptive'}
                   onchange={(on) => (s.render.clock = on ? 'adaptive' : 'even')} />
+          <Switch label="Also make the first style with the other clock, to switch in the Player" bind:checked={s.render.second_clock} />
         </div>
       </section>
 

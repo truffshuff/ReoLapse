@@ -224,7 +224,9 @@ better trade than switching to Clear.
 The adaptive clock gives busy times of day more of the video and quiet ones (the night) less, so where
 things happen the clock runs closer to the objects' pace; on a real day it halved that gap (a 29 s walk:
 44 → 20 minutes of clock) and the night passes in seconds. Switch it off for a clock that runs at one
-rate all day. It applies to videos rendered afterwards: queue a *Render* to redo a day. Raising **object
+rate all day. It applies to videos rendered afterwards: queue a *Render* to redo a day. With **Also make
+the first style with the other clock** on (the default), each render adds one more video, in the first
+style with the other clock, and the Player shows **Adaptive clock / Even clock** to switch between them. Raising **object
 speed** (up to 8×) or lowering **objects on screen** (a longer video) shortens the gap further.
 
 Styles (one video each), tag colors (by type, or by time of day), **allowed time shift** (how far an

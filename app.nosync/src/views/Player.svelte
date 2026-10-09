@@ -58,11 +58,17 @@
   }
 
   const cameras = $derived(days.find((d) => d.day === day)?.cameras ?? []);
-  // synopsis_<style>_<color>[_<types>].mp4 -> { name, style, color, only }
+  // synopsis_<style>_<color>[_<types>][_<clock>].mp4 -> { name, style, color, only, alt }. A clock in the
+  // name marks the alternative-clock copy of the plain-named video (rendered for the first style).
+  const CLOCKS = ['even', 'adaptive'];
   const videos = $derived((info?.outputs ?? []).filter((o) => o.name.endsWith('.mp4')).map((o) => {
-    const [, style, color, only = 'all'] = o.name.replace(/\.mp4$/, '').split('_');
-    return { name: o.name, style, color, only };
+    const [, style, color, ...rest] = o.name.replace(/\.mp4$/, '').split('_');
+    return { name: o.name, style, color, only: rest.find((x) => !CLOCKS.includes(x)) ?? 'all',
+             alt: rest.find((x) => CLOCKS.includes(x)) ?? null };
   }));
+  const altClock = $derived(videos.find((v) => v.alt)?.alt ?? null); // the clock the alternative copies use
+  const mainClock = $derived(altClock === 'even' ? 'adaptive' : altClock === 'adaptive' ? 'even' : null);
+  const CLOCK_NAME = { even: 'Even', adaptive: 'Adaptive' };
   const STYLE_NAMES = ['cutout', 'ghost', 'outline'];
   const SHOW = [['all', 'Everything'], ['person', 'People'], ['vehicle', 'Vehicles'], ['animal', 'Animals']];
   const current = $derived(videos.find((v) => v.name === videoName));
@@ -72,11 +78,14 @@
   let request = $state(null); // { job, only, status, frac } for a type video queued from here
   const showLabel = $derived(SHOW.find(([k]) => k === show)?.[1].toLowerCase() ?? '');
   const showMissing = $derived(show !== 'all' && !videos.some((v) => v.only === show));
-  const has = (style, only) => videos.some((v) => v.style === style && v.only === only);
-  // switch one control and keep the other where possible
-  function choose(style, only) {
-    const pick = videos.find((v) => v.style === style && v.only === only)
-      ?? videos.find((v) => v.only === only) ?? videos.find((v) => v.style === style && v.only === 'all');
+  const has = (style, only) => videos.some((v) => v.style === style && v.only === only && !v.alt);
+  const hasAlt = (style, only) => videos.some((v) => v.style === style && v.only === only && v.alt);
+  // switch one control and keep the others where possible
+  function choose(style, only, alt = current?.alt ?? null) {
+    const main = videos.filter((v) => !v.alt);
+    const pick = (alt && videos.find((v) => v.style === style && v.only === only && v.alt === alt))
+      ?? main.find((v) => v.style === style && v.only === only)
+      ?? main.find((v) => v.only === only) ?? main.find((v) => v.style === style && v.only === 'all');
     if (pick) videoName = pick.name;
   }
 
@@ -135,7 +144,7 @@
     history.replaceState(null, '', `#/player?day=${d}&camera=${encodeURIComponent(c)}`);
     api.cameraDay(d, c).then((x) => {
       info = x;
-      const vids = x.outputs.filter((o) => o.name.endsWith('.mp4') && !/_(person|vehicle|animal)/.test(o.name));
+      const vids = x.outputs.filter((o) => o.name.endsWith('.mp4') && !/_(person|vehicle|animal|even|adaptive)/.test(o.name));
       videoName = (vids.find((v) => v.name.includes('cutout')) ?? vids[0] ?? x.outputs.find((o) => o.name.endsWith('.mp4')))?.name ?? '';
       originalSrc = '';
       originalT = null;
@@ -258,7 +267,7 @@
   <div class="toolbar">
     {#if videos.length > 1 && current}
       <div class="seg" role="group" aria-label="Style">
-        {#each STYLE_NAMES.filter((st) => videos.some((v) => v.style === st)) as st}
+        {#each STYLE_NAMES.filter((st) => videos.some((v) => v.style === st && !v.alt)) as st}
           <button aria-pressed={current.style === st} onclick={() => choose(st, current.only)}
                   class:missing={!has(st, current.only)}
                   title={has(st, current.only) ? '' : `No ${st} video of this yet: the closest one is shown`}>{st}</button>
@@ -270,6 +279,15 @@
                   title={videos.some((v) => v.only === k) ? '' : `No ${label.toLowerCase()}-only video for this day yet: click to make one`}>{label}</button>
         {/each}
       </div>
+      {#if hasAlt(current.style, current.only)}
+        <div class="seg" role="group" aria-label="Clock"
+             title="Adaptive gives busy times of day more of the video, so tags and the clock stay closer; Even runs the clock at one rate all day">
+          {#each [mainClock, altClock] as c}
+            <button aria-pressed={(current.alt ?? mainClock) === c}
+                    onclick={() => choose(current.style, current.only, c === altClock ? altClock : null)}>{CLOCK_NAME[c]} clock</button>
+          {/each}
+        </div>
+      {/if}
     {/if}
     {#if videoName}
       <div class="push row">

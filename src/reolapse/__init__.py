@@ -51,6 +51,8 @@ def _render_opts(sp):
                     help="max minutes an object may be shifted from its true time to avoid overlaps (0 = never)")
     sp.add_argument("--clock", choices=["even", "adaptive"], default="even",
                     help="even: the clock runs at one rate all day; adaptive: busy times get more of the video")
+    sp.add_argument("--second-clock", action="store_true",
+                    help="also render the first style with the other clock, so the Player can switch")
 
 
 def main() -> None:
@@ -109,4 +111,5 @@ def main() -> None:
                    density=args.density, speed=args.speed, max_tube=args.max_tube, fps=args.out_fps,
                    labels=not args.no_labels, only=set(args.only.split(",")) if args.only else None,
                    per_type=[k for k in args.per_type.split(",") if k],
-                   stills=not args.no_stills, video=not args.no_video, drift_min=args.drift, clock_mode=args.clock)
+                   stills=not args.no_stills, video=not args.no_video, drift_min=args.drift, clock_mode=args.clock,
+                   second_clock=args.second_clock)

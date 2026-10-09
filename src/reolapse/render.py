@@ -470,7 +470,8 @@ CATEGORY_NAME = {"person": "people", "vehicle": "vehicles", "animal": "animals"}
 
 def run(cameras, day, *, styles: list[str], color: str, length: float | None, density: float, speed: float,
         max_tube: float, fps: float, labels: bool, only: set[str] | None, stills: bool,
-        video: bool = True, drift_min: float = 10.0, per_type: list[str] = (), clock_mode: str = "even") -> None:
+        video: bool = True, drift_min: float = 10.0, per_type: list[str] = (), clock_mode: str = "even",
+        second_clock: bool = False) -> None:
     """Render each camera's videos and stills.
 
     only:     render just these object types (videos and stills named ..._<types>).
@@ -478,7 +479,10 @@ def run(cameras, day, *, styles: list[str], color: str, length: float | None, de
               (fewer objects, so a shorter, cheaper render).
     stills:   trails, group shot and heatmap; a full render also makes them for each type present
               (each takes seconds), so Insights can show one type at a time.
+    second_clock: also render the first style with the other clock (synopsis_<style>_<color>_<clock>.mp4),
+              so the Player can switch between the even and the adaptive clock.
     """
+    other = "even" if clock_mode == "adaptive" else "adaptive"
     for cam in cameras:
         paths = DayPaths(cam, day)
         print(f"== {cam}: making the videos and stills for {day}")
@@ -503,6 +507,18 @@ def run(cameras, day, *, styles: list[str], color: str, length: float | None, de
             render_video(paths, tubes, bgs, style=style, color=color, length=length, density=density, speed=speed,
                          max_tube=max_tube, fps=fps, labels=labels, tag=f"{style}_{color}{suffix}",
                          drift_min=drift_min, clock_mode=clock_mode)
+        if video and not only:
+            # A video named for a clock is the alternative to the plain-named ones: drop any that the main
+            # clock has made redundant (Settings flipped), or that are no longer wanted.
+            stale = [clock_mode] + ([] if second_clock else [other])
+            for style in styles:
+                for c in stale:
+                    _remove_output(paths, f"synopsis_{style}_{color}_{c}")
+            if second_clock:
+                print(f"   the same in {styles[0]} with the {other} clock, so the Player can switch:")
+                render_video(paths, tubes, bgs, style=styles[0], color=color, length=length, density=density,
+                             speed=speed, max_tube=max_tube, fps=fps, labels=labels,
+                             tag=f"{styles[0]}_{color}_{other}", drift_min=drift_min, clock_mode=other)
         for kind in extras:
             subset = [t for t in all_tubes if t.category == kind]
             print(f"   {CATEGORY_NAME.get(kind, kind)} only:")
@@ -515,6 +531,13 @@ def run(cameras, day, *, styles: list[str], color: str, length: float | None, de
             for fn in (render_trails, render_strobe, render_heatmap):
                 print(f"   still image: {fn(paths, subset, bgs, kind).name}")
         publish(paths)
+
+
+def _remove_output(paths: DayPaths, stem: str) -> None:
+    """Delete a video and its sidecar, here and on the share."""
+    for folder in {paths.out, paths.published}:
+        for ext in (".mp4", ".json"):
+            (folder / f"{stem}{ext}").unlink(missing_ok=True)
 
 
 def publish(paths: DayPaths) -> None:
