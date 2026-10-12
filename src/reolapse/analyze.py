@@ -332,6 +332,12 @@ class MotionGate:
 
 BATCH = 8  # frames per YOLO call; batched fp16 on MPS is ~1.7x faster than per-frame model.track()
 
+# macOS refuses the GPU shader compiler to a process left over from an ended login session (the
+# Reolapse server outliving its app, e.g. after WindowServer restarted): the detector can't load.
+METAL_UNREACHABLE = ("\n   The detector can't use the GPU: macOS won't let this process reach its Metal shader compiler"
+                     " (MTLCompilerService).\n   This happens when the Reolapse server outlives the app that started it."
+                     " Quit Reolapse (⌘Q), open it again and retry; if that doesn't help, restart the Mac.")
+
 
 def _tracker():
     from ultralytics.trackers.byte_tracker import BYTETracker
@@ -523,8 +529,13 @@ def detect_tubes(paths: DayPaths, recs: list[Recording], windows, fps: float, mo
         def flush():
             if not batch:
                 return
-            results = model.predict([f for _, f in batch], imgsz=imgsz, conf=0.35, classes=keep, device="mps",
-                                    quantize=16, verbose=False)
+            try:
+                results = model.predict([f for _, f in batch], imgsz=imgsz, conf=0.35, classes=keep, device="mps",
+                                        quantize=16, verbose=False)
+            except RuntimeError as e:
+                if "MTLCompilerService" in str(e):
+                    raise SystemExit(METAL_UNREACHABLE) from None
+                raise
             for (t, frame), r in zip(batch, results):
                 if len(r.boxes) and r.masks is not None:
                     H, W = frame.shape[:2]

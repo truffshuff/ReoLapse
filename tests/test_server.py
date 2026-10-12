@@ -725,3 +725,23 @@ def test_kept_days_survive_cleanup(env, monkeypatch):
         client.put(f"/api/kept/{dirs[20]}", json={})
         assert not cleanup.plan({"raw_days": 14, "results_days": 90}, today=today).items
         assert client.delete(f"/api/kept/{dirs[100]}").json() == {dirs[20]: ""}
+
+
+def test_server_stops_when_its_app_is_gone():
+    import asyncio
+    import subprocess
+
+    from reolapse.server.app import watch_parent
+
+    app = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(0.3)"])
+    gone = []
+
+    async def scenario():
+        watcher = asyncio.create_task(watch_parent(app.pid, every=0.05, on_gone=lambda: gone.append(True)))
+        await asyncio.sleep(0.1)
+        assert not gone  # the app is still running
+        app.wait()
+        await asyncio.wait_for(watcher, timeout=2)
+
+    asyncio.run(scenario())
+    assert gone

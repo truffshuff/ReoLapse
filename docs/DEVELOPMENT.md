@@ -197,7 +197,11 @@ Packaged, the app carries the Python project, `uv` and a static ffmpeg as resour
 after an update) it runs `uv sync --frozen --no-dev --no-editable` into
 `~/Library/Application Support/Reolapse/engine` with a uv-managed Python, then starts
 `engine/bin/python -m reolapse serve` with the bundled tools on `PATH` and `REOLAPSE_APP_VERSION` set
-to the app's version (from source the server reads `app.nosync/package.json`).
+to the app's version (from source the server reads `app.nosync/package.json`). The app also sets
+`REOLAPSE_PARENT_PID` to its own pid, and the server shuts down gracefully once that process is gone:
+a server that outlives its app (crash, force quit, a WindowServer restart ending the login session)
+can no longer reach the Metal shader compiler, so every scan would fail with "Unable to reach
+MTLCompilerService", and the next app launch would find it answering and reuse it.
 
 **PDF reports.** `#/report?day=&cams=&types=&per=` is a print-styled page; `electron/preload.cjs`
 exposes `window.reolapse.savePdf(hash)`, and the main process loads that hash with `print=1` in a

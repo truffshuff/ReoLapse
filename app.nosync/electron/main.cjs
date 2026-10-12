@@ -94,17 +94,19 @@ function setupEngine() {
 
 async function ensureServer() {
   if (await get('/api/health')) return; // already running (another window, or started from a terminal)
+  // The server stops itself once this process is gone (crash, force quit, WindowServer restart).
+  const env = { ...toolEnv(), REOLAPSE_PARENT_PID: String(process.pid) };
   if (PACKAGED) {
     if (!engineReady()) await setupEngine();
     fs.mkdirSync(path.join(DATA, 'logs'), { recursive: true });
     const log = fs.openSync(path.join(DATA, 'logs', 'server.log'), 'a');
     server = spawn(PY, ['-m', 'reolapse', 'serve', '--port', String(PORT)], {
-      cwd: DATA, env: toolEnv(), stdio: ['ignore', log, log],
+      cwd: DATA, env, stdio: ['ignore', log, log],
     });
   } else {
     const uv = process.env.REOLAPSE_UV || '/opt/homebrew/bin/uv';
     server = spawn(uv, ['run', '--no-sync', 'reolapse', 'serve', '--port', String(PORT)], {
-      cwd: REPO, env: toolEnv(), stdio: ['ignore', 'inherit', 'inherit'],
+      cwd: REPO, env, stdio: ['ignore', 'inherit', 'inherit'],
     });
   }
   server.on('exit', (code) => { server = null; if (code && !quitting) console.error(`reolapse server exited with ${code}`); });

@@ -138,6 +138,35 @@ def _tube_index(paths: DayPaths) -> dict | None:
     return index
 
 
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        pass  # exists, owned by someone else
+    return True
+
+
+async def watch_parent(pid: int, every: float = 5.0, on_gone=None) -> None:
+    """Shut the server down once the app that started it is gone.
+
+    A server that outlives its app (a crash, a force quit, or a WindowServer restart that ends the
+    login session) is left attached to a session that no longer exists: the jobs it starts can't
+    reach the Metal shader compiler ("Unable to reach MTLCompilerService"), so every scan fails,
+    and the next app launch finds this server answering and keeps using it. Stopping lets the next
+    launch start a fresh one; running jobs continue from their checkpoints."""
+    while _alive(pid):
+        await asyncio.sleep(every)
+    print(f"The Reolapse app (pid {pid}) has gone; stopping the server.", flush=True)
+    if on_gone is None:
+        import signal
+
+        os.kill(os.getpid(), signal.SIGTERM)  # uvicorn's graceful shutdown: the queue is saved
+    else:
+        on_gone()
+
+
 def create_app(queue: JobQueue | None = None, updater=None) -> FastAPI:
     from .updates import Updater
 
@@ -153,6 +182,8 @@ def create_app(queue: JobQueue | None = None, updater=None) -> FastAPI:
     async def lifespan(app: FastAPI):
         queue.start()
         queue._spawn(scheduler.loop())
+        if os.environ.get("REOLAPSE_PARENT_PID"):
+            queue._spawn(watch_parent(int(os.environ["REOLAPSE_PARENT_PID"])))
         yield
         await queue.stop()
 
